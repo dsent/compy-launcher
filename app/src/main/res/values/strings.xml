@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Compy Launcher</string>
+    <string name="launching_target">Launching %1$s…</string>
+    <string name="cannot_launch_target">Cannot launch target app.\n\nPackage not found or not visible:\n%1$s\n\nCheck that the target app is installed, TARGET_PACKAGE is correct, and AndroidManifest.xml contains a matching queries entry.</string>
+    <string name="target_activity_not_found">Target app activity not found: %1$s</string>
+    <string name="failed_to_launch_target">Failed to launch target app: %1$s</string>
+
+    <string name="maintenance_title">Maintenance Mode</string>
+    <string name="maintenance_active_until">Maintenance active until: %1$s</string>
+    <string name="maintenance_expired">Maintenance expired</string>
+    <string name="btn_resume_kiosk">Resume Kiosk Now</string>
+    <string name="btn_open_target">Open Compy IDE</string>
+    <string name="btn_open_settings">Android Settings</string>
+    <string name="btn_open_app_settings">App Settings</string>
+    <string name="app_list_header">Installed Apps</string>
+    <string name="tile_label">Kiosk Mode</string>
+</resources>
