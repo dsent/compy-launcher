@@ -6,7 +6,10 @@ Launcher codebase.
 ## 1. Project Overview
 - This is a "soft kiosk" launcher for Compy IDE (a console-based Lua-programmable computer
   for children based on löve2d framework).
+- **Build Target**: Low-end 32-bit Android 13.0 device. Tablet display, always in landscape mode,
+  physical keyboard and mouse.
 - Normal UX must not expose a visible home screen.
+- Use simple Android Views/programmatic UI. No Compose!
 - No overlay permission or device-owner mode used.
 - Kiosk behavior is conservative: delayed launches, throttling, and no rapid restart loops.
 
@@ -22,11 +25,7 @@ Launcher codebase.
 - **KioskState**: SharedPreferences-backed helper for persistent state like maintenance mode and
   Home press history.
 
-## 4. Modification Rules
-- **Surgical Edits**: Use `replace_file_content` or `multi_replace_file_content` for specific logic
-  changes.
+## 4. Verification
 - **Verification**: After modifying `MainActivity.kt` or `AndroidManifest.xml`, check for syntax
   errors or missing imports.
-- **UI**: Use simple Android Views/programmatic UI. No Compose unless already present.
-- **Build Target**: The hardware part runs on Android 13.0
 
