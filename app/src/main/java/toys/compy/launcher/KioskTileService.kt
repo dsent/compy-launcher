@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Danila Sentyabov (dsent.me)
+ * Licensed under the MIT License.
+ */
+
 package toys.compy.launcher
 
 import android.app.PendingIntent

@@ -4,6 +4,9 @@ A lightweight Android "soft kiosk" launcher for [Compy](https://github.com/compy
 a console-based Lua-programmable computer for children based on löve2d framework.
 It ensures Compy IDE remains in the foreground with a hidden maintenance mode for system administration.
 
+**Repository**: [dsent/compy-launcher](https://github.com/dsent/compy-launcher)
+**License**: [MIT](LICENSE)
+
 ## Features
 - **Auto-Launch**: Automatically starts Compy IDE on boot or when the Home button is reached.
 - **Throttled Restarts**: Smart delay and backoff to avoid launch storms if the target app exits.
@@ -12,6 +15,11 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
     - **Five Home Press**: Pressing the Home button 5 times within 5 seconds enables maintenance mode.
     - **Quick Settings Tile**: A "Maintenance" tile to toggle maintenance mode from the notification shade.
 - **Maintenance Control**: A hidden screen to launch other apps, access Android settings, manage files, or resume kiosk mode manually.
+
+## TODO
+- self-update
+- update Compy-IDE
+- OTA updates
 
 ## Configuration
 All kiosk behavior is controlled via `KioskConfig.kt`:
