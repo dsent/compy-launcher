@@ -18,6 +18,8 @@ class KioskTileService : TileService() {
         updateTile()
     }
 
+    @Suppress("DEPRECATION")
+    // Targeting Android 13.0 so we can't use the non-deprecated method here
     override fun onClick() {
         super.onClick()
         KioskState.toggleMaintenance(this)
@@ -34,7 +36,6 @@ class KioskTileService : TileService() {
                 )
                 startActivityAndCollapse(pendingIntent)
             } else {
-                @Suppress("DEPRECATION")
                 startActivityAndCollapse(intent)
             }
         }
