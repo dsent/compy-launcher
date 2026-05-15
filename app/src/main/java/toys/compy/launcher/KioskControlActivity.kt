@@ -71,7 +71,7 @@ class KioskControlActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
-                1f
+                1f,
             )
         }
         val appListContainer = LinearLayout(this).apply {
@@ -111,7 +111,8 @@ class KioskControlActivity : Activity() {
         }
         val apps = pm.queryIntentActivities(intent, 0)
 
-        apps.map { it.activityInfo }
+        apps.asSequence()
+            .map { it.activityInfo }
             .filter { it.packageName != packageName }
             .sortedBy { it.loadLabel(pm).toString().lowercase() }
             .forEach { info ->

@@ -81,13 +81,13 @@ class MainActivity : Activity() {
 
         launchIntent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED,
         )
 
         lastLaunchAttemptTime = System.currentTimeMillis()
         try {
             startActivity(launchIntent)
-        } catch (ignored: Exception) {
+        } catch (_: Exception) {
             openMaintenanceMode()
         }
     }

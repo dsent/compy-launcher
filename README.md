@@ -1,6 +1,8 @@
 # Compy Launcher
 
-A lightweight Android "soft kiosk" Home app designed for Android 13. It ensures Compy IDE remains in the foreground with a hidden maintenance mode for system administration.
+A lightweight Android "soft kiosk" launcher for [Compy](https://github.com/compy-toys/compy),
+a console-based Lua-programmable computer for children based on löve2d framework.
+It ensures Compy IDE remains in the foreground with a hidden maintenance mode for system administration.
 
 ## Features
 - **Auto-Launch**: Automatically starts Compy IDE on boot or when the Home button is reached.
