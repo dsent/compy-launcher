@@ -40,6 +40,9 @@ class KioskTileService : TileService() {
         val active = KioskState.isMaintenanceActive(this)
         tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = getString(R.string.tile_label)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            tile.subtitle = if (active) "Active" else "Inactive"
+        }
         tile.updateTile()
     }
 }

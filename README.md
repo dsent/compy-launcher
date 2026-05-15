@@ -9,9 +9,9 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
 - **Throttled Restarts**: Smart delay and backoff to avoid launch storms if the target app exits.
 - **Maintenance Mode**: A temporary state (default 10 minutes) that suspends auto-launching.
 - **Hidden Triggers**:
-    - **Triple Home Press**: Pressing the Home button 3 times within 5 seconds enables maintenance mode.
-    - **Quick Settings Tile**: A "Kiosk Mode" tile to toggle maintenance mode from the notification shade.
-- **Maintenance Control**: A hidden screen to launch other apps, access Android settings, or resume kiosk mode manually.
+    - **Five Home Press**: Pressing the Home button 5 times within 5 seconds enables maintenance mode.
+    - **Quick Settings Tile**: A "Maintenance" tile to toggle maintenance mode from the notification shade.
+- **Maintenance Control**: A hidden screen to launch other apps, access Android settings, manage files, or resume kiosk mode manually.
 
 ## Configuration
 All kiosk behavior is controlled via `KioskConfig.kt`:

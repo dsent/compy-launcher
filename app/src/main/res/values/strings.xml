@@ -12,6 +12,7 @@
     <string name="btn_open_target">Open Compy IDE</string>
     <string name="btn_open_settings">Android Settings</string>
     <string name="btn_open_app_settings">App Settings</string>
+    <string name="btn_open_files">Files</string>
     <string name="app_list_header">Installed Apps</string>
-    <string name="tile_label">Kiosk Mode</string>
+    <string name="tile_label">Maintenance</string>
 </resources>
