@@ -6,6 +6,23 @@ Background and root-cause analysis live in [android_touchpad_wake_findings.md](a
 
 This document specifies the solution as a delta on the current Compy Launcher codebase.
 
+## Workaround status and clean removal
+
+WakeGuard is a workaround for a hardware/firmware quirk. The expectation is that it goes away once root or a firmware fix lets us mute the wake source itself (see the last section of this document and the findings doc). Treat every new code path here as temporary scaffolding rather than part of the launcher's long-term shape.
+
+To make removal mechanical rather than archaeological:
+
+- Every added or modified block of code (Kotlin, XML, resources) must be wrapped in clearly named region markers so the workaround can be ripped out with a single search.
+- Use these exact markers, including the tag string `WakeGuard workaround`, so a `grep` finds every site:
+  - **Kotlin**: `// region WakeGuard workaround` … `// endregion WakeGuard workaround`
+  - **XML (manifest, resources)**: `<!-- region WakeGuard workaround -->` … `<!-- endregion WakeGuard workaround -->`
+  - **New files** (e.g. `WakeMonitorService.kt`, `KioskDeviceAdminReceiver.kt`, `res/xml/device_admin.xml`): the marker comment goes at the top of the file, in addition to the file's normal license header, declaring that the entire file is part of the workaround.
+- Where a new piece is logically tied to an existing one (e.g. an import added only for WakeGuard, a new `KioskConfig` constant, a new `KioskState` key, a new string in `strings.xml`), wrap just the added lines, not the surrounding existing code.
+- Do not splice workaround logic into the middle of an existing function in a way that makes the marker straddle unrelated lines. If the new logic is more than a few lines, factor it into a dedicated helper (e.g. `MainActivity.handleWakeArbitration()`) and wrap the helper and its single call site with markers.
+- The workaround must not change the launcher's behavior when its entry points are removed. Removing every marked block should leave a working launcher that behaves as it does today.
+
+When the wake source is muted at the OS level, removal is: delete every block between the matching `region` / `endregion` markers, delete the files whose top-level marker covers the entire file, and revert the `KioskConfig` / `KioskState` / `strings.xml` lines wrapped by markers. No other cleanup should be required.
+
 ## Constraints from Compy and the current launcher
 
 - The launcher is the device's default HOME app. Compy-IDE (`toys.compy.ide`) is the visible app; the launcher only appears when HOME is reached or maintenance mode is opened.
@@ -99,6 +116,8 @@ Because (1) and (2) precede (3), an admin can always wake the device by triggeri
 ## Code map
 
 These are the concrete changes to make. File names match the existing package layout under `app/src/main/java/toys/compy/launcher/`.
+
+Every block listed below is part of the workaround and must carry the `WakeGuard workaround` region markers described above. The code samples in this section omit the markers for readability; the actual edits must include them.
 
 ### `KioskConfig.kt` — add tunables
 
@@ -282,6 +301,7 @@ Move the touchpad continuously while the device is trying to sleep. Expect no Ac
 6. Maintenance mode (QS tile or 5-home secret) suppresses arbitration entirely.
 7. No Compy-IDE code changes are required.
 8. All new logs are filterable under `WakeMonitor:` and `MainActivity:` tags.
+9. Every workaround-related code block is wrapped in `WakeGuard workaround` region markers (or covered by a file-level marker for new files), so removal is a mechanical search-and-delete.
 
 ## If privileged access becomes available later
 
