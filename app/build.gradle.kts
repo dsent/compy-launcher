@@ -2,6 +2,29 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// Version identity is supplied by the packaging environment so that the
+// embedded version and the APK file name both identify the exact source
+// commit that produced the build. A plain `./gradlew assembleDebug` in a
+// standalone clone falls back to a placeholder so the build still works.
+val buildVersionName: String =
+    providers.environmentVariable("VERSION_NAME").orNull
+        ?.takeIf { it.isNotBlank() }
+        ?: "0.0.0"
+
+val buildVersionCode: Int =
+    providers.environmentVariable("VERSION_CODE").orNull
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+            it.toIntOrNull()
+                ?: throw GradleException("VERSION_CODE must be an integer: $it")
+        }
+        ?: 1
+
+// When set, names the output APK exactly. Otherwise the name is derived
+// from the version, so it still varies with the build.
+val buildOutputApk: String? =
+    providers.environmentVariable("OUTPUT_APK").orNull?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "toys.compy.launcher"
     compileSdk = 37
@@ -10,8 +33,8 @@ android {
         applicationId = "toys.compy.launcher"
         minSdk = 24
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -34,7 +57,10 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("toys.compy.launcher-${output.versionName.get()}.apk")
+            output.outputFileName.set(
+                buildOutputApk
+                    ?: "toys.compy.launcher-${output.versionName.get()}.apk"
+            )
         }
     }
 }
