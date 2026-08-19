@@ -35,3 +35,16 @@ All kiosk behavior is controlled via `KioskConfig.kt`:
 ## Requirements
 - Android 13 (API 33) is the primary target.
 - `minSdk` 24 (required for `TileService`).
+
+## Building
+
+Release packaging requires the external PKCS#12 keystore
+`compy-android-release.p12`. Set
+`COMPY_ANDROID_KEYSTORE_PATH`, `COMPY_ANDROID_KEYSTORE_PASSWORD`,
+`COMPY_ANDROID_KEY_ALIAS`, and `COMPY_ANDROID_KEY_PASSWORD`, then run
+`./gradlew assembleRelease`. The keystore remains outside the repository.
+
+The `Package signed launcher` workflow uses the `android-release` environment.
+Configure `ANDROID_KEYSTORE_ALIAS`, `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_KEYPASSWORD`, and `ANDROID_KEYSTORE_STOREPASSWORD` as secrets,
+and `ANDROID_SIGNING_CERT_SHA256` as the expected non-secret certificate digest.

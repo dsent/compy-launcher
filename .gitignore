@@ -20,3 +20,9 @@
 .idea/markdown.xml
 .idea/planningMode.xml
 .idea/AndroidProjectSystem.xml
+
+# Product signing keys live outside the repository.
+*.jks
+*.keystore
+*.p12
+*.pfx

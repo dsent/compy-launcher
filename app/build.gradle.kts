@@ -25,6 +25,24 @@ val buildVersionCode: Int =
 val buildOutputApk: String? =
     providers.environmentVariable("OUTPUT_APK").orNull?.takeIf { it.isNotBlank() }
 
+val signingEnvironment =
+    listOf(
+        "COMPY_ANDROID_KEYSTORE_PATH",
+        "COMPY_ANDROID_KEYSTORE_PASSWORD",
+        "COMPY_ANDROID_KEY_ALIAS",
+        "COMPY_ANDROID_KEY_PASSWORD",
+    ).associateWith { name ->
+        providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+    }
+val configuredSigningValues = signingEnvironment.values.count { it != null }
+
+if (configuredSigningValues != 0 && configuredSigningValues != signingEnvironment.size) {
+    val missing = signingEnvironment.filterValues { it == null }.keys.joinToString()
+    throw GradleException("Incomplete Compy Android signing configuration; missing: $missing")
+}
+
+val stableSigningConfigured = configuredSigningValues == signingEnvironment.size
+
 android {
     namespace = "toys.compy.launcher"
     compileSdk = 37
@@ -39,9 +57,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val stableReleaseSigning =
+        if (stableSigningConfigured) {
+            signingConfigs.create("stableRelease") {
+                storeFile = file(signingEnvironment.getValue("COMPY_ANDROID_KEYSTORE_PATH")!!)
+                storeType = "PKCS12"
+                storePassword = signingEnvironment.getValue("COMPY_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = signingEnvironment.getValue("COMPY_ANDROID_KEY_ALIAS")
+                keyPassword = signingEnvironment.getValue("COMPY_ANDROID_KEY_PASSWORD")
+            }
+        } else {
+            null
+        }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            stableReleaseSigning?.let { signingConfig = it }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -51,6 +83,24 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+// Keep Gradle sync and debug-only work usable without product credentials while
+// preventing an unsigned release artifact from being assembled accidentally.
+gradle.taskGraph.whenReady {
+    val packagesRelease =
+        allTasks.any { task ->
+            task.name == "assembleRelease" ||
+                task.name == "bundleRelease" ||
+                task.name == "packageRelease"
+        }
+    if (packagesRelease && !stableSigningConfigured) {
+        throw GradleException(
+            "Release packaging requires COMPY_ANDROID_KEYSTORE_PATH, " +
+                "COMPY_ANDROID_KEYSTORE_PASSWORD, COMPY_ANDROID_KEY_ALIAS, and " +
+                "COMPY_ANDROID_KEY_PASSWORD",
+        )
     }
 }
 
