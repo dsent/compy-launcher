@@ -20,8 +20,10 @@ Launcher codebase.
 - **The Loop**: The app's primary function is to keep the Compy IDE (`toys.compy.ide`) in the
   foreground. This is triggered in `MainActivity.onResume()`.
 - Be conservative: use delayed launches, throttling, and no rapid restart loops.
-- **Intent Flags**: When launching the target app, the flags `FLAG_ACTIVITY_NEW_TASK` and
-  `FLAG_ACTIVITY_RESET_TASK_IF_NEEDED` are mandatory.
+- **Intent Flags**: Ordinary target-app launches and launches inside an existing LockTask session use
+  `FLAG_ACTIVITY_NEW_TASK` and `FLAG_ACTIVITY_RESET_TASK_IF_NEEDED`. Device-Owner LockTask entry uses the
+  scoped `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK` exception because a new LockTask session must
+  start a fresh task.
 - **Maintenance Mode**: A hidden state that suspends auto-launching to allow system maintenance.
 
 ## 5. Configuration & State
@@ -32,4 +34,3 @@ Launcher codebase.
 ## 6. Verification
 - **Verification**: After modifying `MainActivity.kt` or `AndroidManifest.xml`, check for syntax
   errors or missing imports.
-

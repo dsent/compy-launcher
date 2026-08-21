@@ -56,20 +56,23 @@ object KioskState {
             .asSequence()
             .filter { it.isNotEmpty() }
             .mapNotNull { it.toLongOrNull() }
-            .filter { (now - it) < KioskConfig.HOME_SECRET_WINDOW_MS }
-            .toMutableList()
+            .toList()
+        val update =
+            updateHomePressHistory(
+                history = history,
+                now = now,
+                windowMs = KioskConfig.HOME_SECRET_WINDOW_MS,
+                triggerCount = KioskConfig.HOME_SECRET_PRESS_COUNT,
+            )
 
-        history.add(now)
-
-        prefs.edit {
-            putString(KEY_HOME_PRESS_HISTORY, history.joinToString(","))
-        }
-
-        if (history.size >= KioskConfig.HOME_SECRET_PRESS_COUNT) {
+        if (update.triggered) {
             enableMaintenance(context, KioskConfig.MAINTENANCE_DURATION_MS)
-            // Clear history after trigger
             prefs.edit { remove(KEY_HOME_PRESS_HISTORY) }
             return true
+        }
+
+        prefs.edit {
+            putString(KEY_HOME_PRESS_HISTORY, update.retainedHistory.joinToString(","))
         }
         return false
     }

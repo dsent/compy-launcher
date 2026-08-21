@@ -6,6 +6,8 @@
 package toys.compy.launcher
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -28,6 +30,32 @@ class KioskControlActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (LockTaskController.lockTaskModeState(this) != ActivityManager.LOCK_TASK_MODE_NONE) {
+            showUnlockingGate()
+            KioskState.enableMaintenance(this, KioskConfig.MAINTENANCE_DURATION_MS)
+            val appContext = applicationContext
+            LockTaskController.disarm(
+                appContext,
+                onReady = {
+                    finish()
+                    val maintenanceIntent = Intent(appContext, KioskControlActivity::class.java)
+                    maintenanceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    appContext.startActivity(maintenanceIntent)
+                },
+                onFailure = { message ->
+                    if (!isFinishing && !isDestroyed) {
+                        showUnlockingFailure(message)
+                    }
+                },
+            )
+            return
+        }
+
+        buildControls()
+    }
+
+    private fun buildControls() {
 
         // Root container: Horizontal for two columns
         val root = LinearLayout(this).apply {
@@ -68,8 +96,17 @@ class KioskControlActivity : Activity() {
 
         addButton(leftColumn, getString(R.string.btn_resume_kiosk)) {
             KioskState.disableMaintenance(this)
-            launchApp(KioskConfig.TARGET_PACKAGE)
+            val launcherIntent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            startActivity(launcherIntent)
             finish()
+        }
+
+        if (LockTaskController.isDeviceOwner(this)) {
+            addButton(leftColumn, getString(R.string.btn_release_device_owner)) {
+                confirmOwnershipRelease()
+            }
         }
 
         addButton(leftColumn, getString(R.string.btn_open_target)) {
@@ -169,6 +206,67 @@ class KioskControlActivity : Activity() {
         root.addView(rightColumn)
 
         setContentView(root)
+    }
+
+    private fun showUnlockingGate() {
+        setContentView(
+            TextView(this).apply {
+                text = getString(R.string.maintenance_unlocking)
+                textSize = 24f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.BLACK)
+                gravity = Gravity.CENTER
+            },
+        )
+    }
+
+    private fun showUnlockingFailure(message: String) {
+        setContentView(
+            TextView(this).apply {
+                text = getString(R.string.maintenance_unlock_failed, message)
+                textSize = 18f
+                setTextColor(Color.RED)
+                setBackgroundColor(Color.BLACK)
+                gravity = Gravity.CENTER
+                setPadding(32, 32, 32, 32)
+            },
+        )
+    }
+
+    private fun confirmOwnershipRelease() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.release_device_owner_title)
+            .setMessage(R.string.release_device_owner_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.release_device_owner_confirm) { _, _ ->
+                showOwnershipReleaseGate()
+                LockTaskController.releaseDeviceOwner(this) { released, message ->
+                    if (released) {
+                        Toast.makeText(this, R.string.release_device_owner_success, Toast.LENGTH_LONG).show()
+                        recreate()
+                    } else {
+                        buildControls()
+                        Toast.makeText(
+                            this,
+                            getString(R.string.release_device_owner_failed, message ?: "unknown error"),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun showOwnershipReleaseGate() {
+        setContentView(
+            TextView(this).apply {
+                text = getString(R.string.release_device_owner_working)
+                textSize = 24f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.BLACK)
+                gravity = Gravity.CENTER
+            },
+        )
     }
 
     private fun updateStatus(view: TextView) {

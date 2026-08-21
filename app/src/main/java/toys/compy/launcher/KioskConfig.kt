@@ -5,8 +5,18 @@
 
 package toys.compy.launcher
 
+import android.annotation.TargetApi
+import android.app.admin.DevicePolicyManager
+import android.os.Build
+
 object KioskConfig {
+    const val LAUNCHER_PACKAGE = "toys.compy.launcher"
     const val TARGET_PACKAGE = "toys.compy.ide"
+    val LOCK_TASK_PACKAGES = arrayOf(LAUNCHER_PACKAGE, TARGET_PACKAGE)
+    @TargetApi(Build.VERSION_CODES.P)
+    const val LOCK_TASK_FEATURES = DevicePolicyManager.LOCK_TASK_FEATURE_HOME
+    const val LOCK_TASK_CONFIRM_INTERVAL_MS = 100L
+    const val LOCK_TASK_CONFIRM_TIMEOUT_MS = 4000L
     const val NORMAL_LAUNCH_DELAY_MS = 2500L
     const val MIN_LAUNCH_INTERVAL_MS = 5000L
     const val MAX_BACKOFF_DELAY_MS = 15000L

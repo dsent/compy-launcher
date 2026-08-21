@@ -1,0 +1,372 @@
+/*
+ * Copyright (c) 2025 Danila Sentyabov (dsent.me)
+ * Licensed under the MIT License.
+ */
+
+package toys.compy.launcher
+
+import android.app.ActivityManager
+import android.app.ActivityOptions
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+
+/** Sole owner of Device Owner policy and the LockTask lifecycle. */
+object LockTaskController {
+    private const val TAG = "CompyLockTask"
+
+    private val backgroundExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val operationGeneration = AtomicInteger()
+    private var pendingConfirmation: PendingConfirmation? = null
+    @Volatile
+    private var ownershipReleaseInProgress = false
+
+    private data class PendingConfirmation(
+        val generation: Int,
+        val activityManager: ActivityManager,
+        val expectedMode: Int,
+        val deadline: Long,
+        val onConfirmed: () -> Unit,
+        val onTimeout: (String) -> Unit,
+        var readyToCheck: Boolean,
+    )
+
+    fun isDeviceOwner(context: Context): Boolean {
+        return try {
+            devicePolicyManager(context).isDeviceOwnerApp(context.packageName)
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "Could not read Device Owner state", error)
+            false
+        }
+    }
+
+    fun lockTaskModeState(context: Context): Int {
+        return activityManager(context).lockTaskModeState
+    }
+
+    fun isLocked(context: Context): Boolean {
+        return lockTaskModeState(context) == ActivityManager.LOCK_TASK_MODE_LOCKED
+    }
+
+    /**
+     * Applies owner policy and launches the target inside LockTask.
+     * Returns false when this package is not Device Owner so callers can retain soft-kiosk behavior.
+     */
+    fun armAndLaunchTarget(
+        context: Context,
+        onFailure: (String) -> Unit,
+    ): Boolean {
+        val appContext = context.applicationContext
+        if (ownershipReleaseInProgress) {
+            Log.i(TAG, "Kiosk arm skipped while Device Owner release is in progress")
+            return true
+        }
+        if (!isDeviceOwner(appContext)) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            onFailure("Launcher-driven LockTask requires Android 9 or newer")
+            return true
+        }
+
+        val generation = beginOperation()
+        backgroundExecutor.execute {
+            try {
+                armPolicies(appContext)
+            } catch (error: RuntimeException) {
+                failOperation(generation, "Could not arm kiosk policy", error, onFailure)
+                return@execute
+            }
+
+            mainHandler.post {
+                if (operationGeneration.get() != generation) {
+                    return@post
+                }
+
+                val launchIntent =
+                    appContext.packageManager.getLaunchIntentForPackage(KioskConfig.TARGET_PACKAGE)
+                if (launchIntent == null) {
+                    failOperation(
+                        generation,
+                        "Target app has no launch activity: ${KioskConfig.TARGET_PACKAGE}",
+                        null,
+                        onFailure,
+                    )
+                    return@post
+                }
+
+                val alreadyLocked = isLocked(appContext)
+                val launch = lockTaskTargetLaunch(alreadyLocked)
+                launchIntent.addFlags(launch.flags)
+
+                if (!alreadyLocked) {
+                    beginConfirmation(
+                        generation = generation,
+                        context = appContext,
+                        expectedMode = ActivityManager.LOCK_TASK_MODE_LOCKED,
+                        readyToCheck = true,
+                        onConfirmed = { Log.i(TAG, "LockTask entry confirmed") },
+                        onTimeout = onFailure,
+                    )
+                }
+
+                try {
+                    if (launch.enablesLockTask) {
+                        val options = ActivityOptions.makeBasic().apply {
+                            setLockTaskEnabled(true)
+                        }
+                        appContext.startActivity(launchIntent, options.toBundle())
+                    } else {
+                        appContext.startActivity(launchIntent)
+                    }
+                    if (alreadyLocked) {
+                        Log.i(TAG, "Target resumed inside existing LockTask session")
+                    }
+                } catch (error: RuntimeException) {
+                    failOperation(generation, "Could not launch target into LockTask", error, onFailure)
+                }
+            }
+        }
+        return true
+    }
+
+    /** Clears owner policy and confirms LockTask exit before exposing maintenance UI. */
+    fun disarm(
+        context: Context,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
+        disarmInternal(
+            context = context,
+            allowDuringOwnershipRelease = false,
+            onReady = onReady,
+            onFailure = onFailure,
+        )
+    }
+
+    private fun disarmInternal(
+        context: Context,
+        allowDuringOwnershipRelease: Boolean,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
+        val appContext = context.applicationContext
+        if (ownershipReleaseInProgress && !allowDuringOwnershipRelease) {
+            mainHandler.post { onFailure("Device Owner release is already in progress") }
+            return
+        }
+        val generation = beginOperation()
+
+        if (!isDeviceOwner(appContext)) {
+            if (lockTaskModeState(appContext) == ActivityManager.LOCK_TASK_MODE_NONE) {
+                mainHandler.post { onReady() }
+            } else {
+                mainHandler.post { onFailure("LockTask is active but the launcher is not Device Owner") }
+            }
+            return
+        }
+
+        mainHandler.post {
+            beginConfirmation(
+                generation = generation,
+                context = appContext,
+                expectedMode = ActivityManager.LOCK_TASK_MODE_NONE,
+                readyToCheck = false,
+                onConfirmed = onReady,
+                onTimeout = onFailure,
+            )
+        }
+
+        backgroundExecutor.execute {
+            try {
+                val dpm = devicePolicyManager(appContext)
+                val admin = adminComponent(appContext)
+                // Removing the active package from the allowlist exits LockTask on API 23+.
+                dpm.setLockTaskPackages(admin, emptyArray())
+                dpm.clearPackagePersistentPreferredActivities(admin, appContext.packageName)
+            } catch (error: RuntimeException) {
+                failOperation(generation, "Could not disarm kiosk policy", error, onFailure)
+                return@execute
+            }
+
+            mainHandler.post {
+                val pending = pendingConfirmation
+                if (pending?.generation == generation) {
+                    pending.readyToCheck = true
+                    checkPendingConfirmation(generation)
+                }
+            }
+        }
+    }
+
+    fun releaseDeviceOwner(
+        context: Context,
+        onComplete: (Boolean, String?) -> Unit,
+    ) {
+        val appContext = context.applicationContext
+        if (ownershipReleaseInProgress) {
+            mainHandler.post { onComplete(false, "Device Owner release is already in progress") }
+            return
+        }
+        ownershipReleaseInProgress = true
+        val complete = { released: Boolean, message: String? ->
+            ownershipReleaseInProgress = false
+            onComplete(released, message)
+        }
+        disarmInternal(
+            appContext,
+            allowDuringOwnershipRelease = true,
+            onReady = {
+                backgroundExecutor.execute {
+                    try {
+                        val dpm = devicePolicyManager(appContext)
+                        if (dpm.isDeviceOwnerApp(appContext.packageName)) {
+                            @Suppress("DEPRECATION")
+                            dpm.clearDeviceOwnerApp(appContext.packageName)
+                        }
+                        val released = !dpm.isDeviceOwnerApp(appContext.packageName)
+                        mainHandler.post {
+                            complete(
+                                released,
+                                if (released) null else "Android still reports the launcher as Device Owner",
+                            )
+                        }
+                    } catch (error: RuntimeException) {
+                        Log.e(TAG, "Could not release Device Owner", error)
+                        mainHandler.post { complete(false, error.message) }
+                    }
+                }
+            },
+            onFailure = { message -> complete(false, message) },
+        )
+    }
+
+    /** DeviceAdmin callbacks wake the bounded poll; ActivityManager remains authoritative. */
+    fun onLockTaskStateChanged() {
+        mainHandler.post {
+            val pending = pendingConfirmation ?: return@post
+            checkPendingConfirmation(pending.generation)
+        }
+    }
+
+    private fun armPolicies(context: Context) {
+        val dpm = devicePolicyManager(context)
+        val admin = adminComponent(context)
+        dpm.setLockTaskPackages(admin, KioskConfig.LOCK_TASK_PACKAGES)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            dpm.setLockTaskFeatures(admin, KioskConfig.LOCK_TASK_FEATURES)
+        }
+
+        val homeFilter = IntentFilter(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_DEFAULT)
+            addCategory(Intent.CATEGORY_HOME)
+        }
+        dpm.addPersistentPreferredActivity(
+            admin,
+            homeFilter,
+            ComponentName(context, MainActivity::class.java),
+        )
+    }
+
+    private fun beginOperation(): Int {
+        val generation = operationGeneration.incrementAndGet()
+        mainHandler.post {
+            pendingConfirmation = null
+        }
+        return generation
+    }
+
+    private fun beginConfirmation(
+        generation: Int,
+        context: Context,
+        expectedMode: Int,
+        readyToCheck: Boolean,
+        onConfirmed: () -> Unit,
+        onTimeout: (String) -> Unit,
+    ) {
+        if (operationGeneration.get() != generation) {
+            return
+        }
+        pendingConfirmation =
+            PendingConfirmation(
+                generation = generation,
+                activityManager = activityManager(context),
+                expectedMode = expectedMode,
+                deadline = SystemClock.elapsedRealtime() + KioskConfig.LOCK_TASK_CONFIRM_TIMEOUT_MS,
+                onConfirmed = onConfirmed,
+                onTimeout = onTimeout,
+                readyToCheck = readyToCheck,
+            )
+        mainHandler.postDelayed(
+            { checkPendingConfirmation(generation) },
+            KioskConfig.LOCK_TASK_CONFIRM_INTERVAL_MS,
+        )
+    }
+
+    private fun checkPendingConfirmation(generation: Int) {
+        val pending = pendingConfirmation ?: return
+        if (pending.generation != generation || operationGeneration.get() != generation) {
+            return
+        }
+        if (!pending.readyToCheck) {
+            return
+        }
+
+        val actualMode = pending.activityManager.lockTaskModeState
+        if (actualMode == pending.expectedMode) {
+            pendingConfirmation = null
+            pending.onConfirmed()
+            return
+        }
+
+        if (SystemClock.elapsedRealtime() >= pending.deadline) {
+            pendingConfirmation = null
+            pending.onTimeout(
+                "Timed out waiting for LockTask mode ${pending.expectedMode}; current mode is $actualMode",
+            )
+            return
+        }
+
+        mainHandler.postDelayed(
+            { checkPendingConfirmation(generation) },
+            KioskConfig.LOCK_TASK_CONFIRM_INTERVAL_MS,
+        )
+    }
+
+    private fun failOperation(
+        generation: Int,
+        message: String,
+        error: RuntimeException?,
+        onFailure: (String) -> Unit,
+    ) {
+        Log.e(TAG, message, error)
+        mainHandler.post {
+            if (operationGeneration.get() == generation) {
+                pendingConfirmation = null
+                onFailure(error?.message?.let { "$message: $it" } ?: message)
+            }
+        }
+    }
+
+    private fun adminComponent(context: Context): ComponentName {
+        return ComponentName(context, KioskDeviceAdminReceiver::class.java)
+    }
+
+    private fun devicePolicyManager(context: Context): DevicePolicyManager {
+        return context.getSystemService(DevicePolicyManager::class.java)
+    }
+
+    private fun activityManager(context: Context): ActivityManager {
+        return context.getSystemService(ActivityManager::class.java)
+    }
+}
