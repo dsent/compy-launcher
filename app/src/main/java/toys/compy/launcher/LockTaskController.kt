@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -39,6 +40,11 @@ object LockTaskController {
         val onConfirmed: () -> Unit,
         val onTimeout: (String) -> Unit,
         var readyToCheck: Boolean,
+    )
+
+    data class RecoveryResult(
+        val success: Boolean,
+        val message: String,
     )
 
     fun isDeviceOwner(context: Context): Boolean {
@@ -67,6 +73,10 @@ object LockTaskController {
         onFailure: (String) -> Unit,
     ): Boolean {
         val appContext = context.applicationContext
+        if (RecoveryState.isRequested(appContext)) {
+            Log.i(TAG, "Kiosk arm skipped because recovery is requested")
+            return true
+        }
         if (ownershipReleaseInProgress) {
             Log.i(TAG, "Kiosk arm skipped while Device Owner release is in progress")
             return true
@@ -249,6 +259,55 @@ object LockTaskController {
             },
             onFailure = { message -> complete(false, message) },
         )
+    }
+
+    /**
+     * Clears launcher-owned policy from the isolated recovery process.
+     * The durable gate is written first so a live or restarting UI process cannot re-arm.
+     */
+    fun recoverDeviceOwner(context: Context): RecoveryResult {
+        val appContext = context.applicationContext
+        try {
+            RecoveryState.request(appContext)
+        } catch (error: IOException) {
+            Log.e(TAG, "Could not persist recovery request", error)
+            return RecoveryResult(false, error.message ?: "Could not persist recovery request")
+        }
+
+        return try {
+            val dpm = devicePolicyManager(appContext)
+            if (dpm.isDeviceOwnerApp(appContext.packageName)) {
+                val admin = adminComponent(appContext)
+                dpm.setLockTaskPackages(admin, emptyArray())
+                dpm.clearPackagePersistentPreferredActivities(admin, appContext.packageName)
+                @Suppress("DEPRECATION")
+                dpm.clearDeviceOwnerApp(appContext.packageName)
+            }
+
+            if (dpm.isDeviceOwnerApp(appContext.packageName)) {
+                RecoveryResult(false, "Android still reports the launcher as Device Owner")
+            } else {
+                RecoveryResult(true, "Device Owner released; kiosk arming remains disabled")
+            }
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "Could not recover Device Owner", error)
+            RecoveryResult(false, error.message ?: "Could not recover Device Owner")
+        }
+    }
+
+    /** Clears the recovery gate after the utility has re-provisioned this package as Device Owner. */
+    fun enableAfterRecovery(context: Context): RecoveryResult {
+        val appContext = context.applicationContext
+        if (!isDeviceOwner(appContext)) {
+            return RecoveryResult(false, "Launcher must be Device Owner before enabling kiosk")
+        }
+        return try {
+            RecoveryState.clear(appContext)
+            RecoveryResult(true, "Kiosk arming enabled")
+        } catch (error: IOException) {
+            Log.e(TAG, "Could not clear recovery request", error)
+            RecoveryResult(false, error.message ?: "Could not clear recovery request")
+        }
     }
 
     /** DeviceAdmin callbacks wake the bounded poll; ActivityManager remains authoritative. */

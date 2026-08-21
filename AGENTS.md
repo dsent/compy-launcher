@@ -25,6 +25,12 @@ Launcher codebase.
   scoped `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK` exception because a new LockTask session must
   start a fresh task.
 - **Maintenance Mode**: A hidden state that suspends auto-launching to allow system maintenance.
+- **Recovery**: `RecoveryReceiver` is exported for adb and runs in `:recovery`. Keep it independent of
+  activities and any custom `Application` startup work. It writes the cross-process recovery gate before
+  clearing policy; every LockTask arm path must honor that gate.
+- **Device Policy**: `LockTaskController` is the only class that mutates Device Owner policy. Never set
+  `DISALLOW_DEBUGGING_FEATURES`, `DISALLOW_FACTORY_RESET`, or
+  `DISALLOW_MOUNT_PHYSICAL_MEDIA`; each removes a required recovery route.
 
 ## 5. Configuration & State
 - **KioskConfig**: Central place for all kiosk-related constants (timeouts, target package).
