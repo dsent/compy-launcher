@@ -9,7 +9,21 @@
     <string name="maintenance_title">Maintenance Mode</string>
     <string name="maintenance_active_until">Maintenance active until: %1$s</string>
     <string name="maintenance_expired">Maintenance expired</string>
-    <string name="btn_resume_kiosk">Resume Kiosk Now</string>
+    <string name="maintenance_group_compy">Compy</string>
+    <string name="maintenance_group_device">Device</string>
+    <string name="maintenance_group_recovery">Recovery</string>
+    <string name="maintenance_status_title">Status</string>
+    <string name="maintenance_ready_title">Ready</string>
+    <string name="maintenance_ready_message">Choose an action. Progress and results appear here.</string>
+    <string name="maintenance_action_failed">Action failed</string>
+    <string name="maintenance_open_failed">Android could not open this screen.</string>
+    <string name="maintenance_unknown_error">unknown error</string>
+    <string name="maintenance_opening_settings_title">Android Settings</string>
+    <string name="maintenance_opening_settings_message">Use Back to return to maintenance mode.</string>
+    <string name="maintenance_opening_files_title">Files</string>
+    <string name="maintenance_opening_files_message">Use Back to return to maintenance mode.</string>
+    <string name="maintenance_no_file_manager">No file manager is available.</string>
+    <string name="btn_exit_maintenance">Exit maintenance mode</string>
     <string name="maintenance_unlocking">Unlocking maintenance…</string>
     <string name="maintenance_unlock_failed">Could not unlock maintenance.\n\n%1$s</string>
     <string name="btn_release_device_owner">Release Device Owner</string>
@@ -17,12 +31,11 @@
     <string name="release_device_owner_message">This removes Compy kiosk ownership and leaves ordinary Android available. The device must be provisioned again before kiosk locking can resume.</string>
     <string name="release_device_owner_confirm">Release ownership</string>
     <string name="release_device_owner_working">Releasing Device Owner…</string>
+    <string name="release_device_owner_wait">Please wait. Maintenance actions are disabled until Android confirms the result.</string>
     <string name="release_device_owner_success">Device Owner released</string>
+    <string name="release_device_owner_success_message">Ordinary Android is available. Provision the launcher again before resuming kiosk locking.</string>
     <string name="release_device_owner_failed">Could not release Device Owner: %1$s</string>
-    <string name="btn_open_target">Open Compy IDE</string>
     <string name="btn_open_settings">Android Settings</string>
-    <string name="btn_open_app_settings">App Settings</string>
     <string name="btn_open_files">Files</string>
-    <string name="app_list_header">Installed Apps</string>
     <string name="tile_label">Maintenance</string>
 </resources>

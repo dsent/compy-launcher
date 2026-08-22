@@ -8,25 +8,37 @@ package toys.compy.launcher
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.content.ComponentName
-import android.widget.Toast
+import androidx.core.graphics.toColorInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-import androidx.core.graphics.toColorInt
-
 class KioskControlActivity : Activity() {
+    private data class MaintenanceAction(
+        val labelRes: Int,
+        val invoke: () -> Unit,
+    )
+
+    private data class MaintenanceGroup(
+        val titleRes: Int,
+        val actions: List<MaintenanceAction>,
+    )
+
+    private val actionButtons = mutableListOf<Button>()
+    private var operationTitleView: TextView? = null
+    private var operationMessageView: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,156 +68,260 @@ class KioskControlActivity : Activity() {
     }
 
     private fun buildControls() {
+        actionButtons.clear()
 
-        // Root container: Horizontal for two columns
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.BLACK)
             weightSum = 2f
         }
 
-        // LEFT COLUMN: Maintenance Controls
-        val leftScroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.8f)
-            isVerticalScrollBarEnabled = false
+        val actionScroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f)
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
         }
-        val leftColumn = LinearLayout(this).apply {
+        val actionColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
-            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(32, 28, 24, 32)
         }
-        leftScroll.addView(leftColumn)
+        actionScroll.addView(actionColumn)
 
-        val titleView = TextView(this).apply {
-            text = getString(R.string.maintenance_title)
-            textSize = 24f
-            setTextColor(Color.WHITE)
-            setPadding(0, 0, 0, 8)
-            gravity = Gravity.CENTER
-        }
-        leftColumn.addView(titleView)
+        actionColumn.addView(
+            TextView(this).apply {
+                text = getString(R.string.maintenance_title)
+                textSize = 26f
+                setTextColor(Color.WHITE)
+                setPadding(0, 0, 0, 8)
+            },
+        )
 
         val statusView = TextView(this).apply {
             setTextColor(Color.YELLOW)
             textSize = 14f
-            setPadding(0, 0, 0, 24)
-            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 20)
         }
         updateStatus(statusView)
-        leftColumn.addView(statusView)
+        actionColumn.addView(statusView)
 
-        addButton(leftColumn, getString(R.string.btn_resume_kiosk)) {
-            KioskState.disableMaintenance(this)
-            val launcherIntent = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        var firstButton: Button? = null
+        maintenanceGroups().forEach { group ->
+            addGroupHeader(actionColumn, group.titleRes)
+            group.actions.forEach { action ->
+                val button = addButton(actionColumn, action.labelRes, action.invoke)
+                if (firstButton == null) {
+                    firstButton = button
+                }
             }
-            startActivity(launcherIntent)
-            finish()
         }
 
+        val statusScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.9f)
+        }
+        val statusPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(40, 40, 40, 40)
+            setBackgroundColor("#171717".toColorInt())
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        statusPanel.addView(
+            TextView(this).apply {
+                text = getString(R.string.maintenance_status_title)
+                textSize = 18f
+                setTextColor(Color.GRAY)
+                setPadding(0, 0, 0, 20)
+            },
+        )
+        operationTitleView =
+            TextView(this).apply {
+                text = getString(R.string.maintenance_ready_title)
+                textSize = 24f
+                setTextColor(Color.WHITE)
+                setPadding(0, 0, 0, 12)
+            }
+        statusPanel.addView(operationTitleView)
+        operationMessageView =
+            TextView(this).apply {
+                text = getString(R.string.maintenance_ready_message)
+                textSize = 17f
+                setTextColor("#D0D0D0".toColorInt())
+        }
+        statusPanel.addView(operationMessageView)
+        statusScroll.addView(statusPanel)
+
+        root.addView(actionScroll)
+        root.addView(statusScroll)
+        setContentView(root)
+        configureActionFocus()
+        firstButton?.requestFocus()
+    }
+
+    private fun configureActionFocus() {
+        actionButtons.forEach { button ->
+            button.id = View.generateViewId()
+            button.isFocusableInTouchMode = true
+        }
+        actionButtons.forEachIndexed { index, button ->
+            val previous = actionButtons.getOrNull(index - 1)
+            val next = actionButtons.getOrNull(index + 1)
+            previous?.let { button.nextFocusUpId = it.id }
+            next?.let {
+                button.nextFocusDownId = it.id
+                button.nextFocusForwardId = it.id
+            }
+        }
+    }
+
+    private fun maintenanceGroups(): List<MaintenanceGroup> {
+        val groups =
+            mutableListOf(
+                MaintenanceGroup(
+                    R.string.maintenance_group_compy,
+                    listOf(
+                        MaintenanceAction(R.string.btn_exit_maintenance, ::exitMaintenance),
+                    ),
+                ),
+                MaintenanceGroup(
+                    R.string.maintenance_group_device,
+                    listOf(
+                        MaintenanceAction(R.string.btn_open_settings, ::openAndroidSettings),
+                        MaintenanceAction(R.string.btn_open_files, ::openFiles),
+                    ),
+                ),
+            )
         if (LockTaskController.isDeviceOwner(this)) {
-            addButton(leftColumn, getString(R.string.btn_release_device_owner)) {
-                confirmOwnershipRelease()
-            }
+            groups +=
+                MaintenanceGroup(
+                    R.string.maintenance_group_recovery,
+                    listOf(
+                        MaintenanceAction(R.string.btn_release_device_owner, ::confirmOwnershipRelease),
+                    ),
+                )
         }
+        return groups
+    }
 
-        addButton(leftColumn, getString(R.string.btn_open_target)) {
-            launchApp(KioskConfig.TARGET_PACKAGE)
+    private fun exitMaintenance() {
+        KioskState.disableMaintenance(this)
+        val launcherIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
+        startActivity(launcherIntent)
+        finish()
+    }
 
-        addButton(leftColumn, getString(R.string.btn_open_settings)) {
+    private fun openAndroidSettings() {
+        showOperation(
+            getString(R.string.maintenance_opening_settings_title),
+            getString(R.string.maintenance_opening_settings_message),
+        )
+        try {
             startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (error: RuntimeException) {
+            showOperationFailure(error.message ?: getString(R.string.maintenance_open_failed))
         }
+    }
 
-        addButton(leftColumn, getString(R.string.btn_open_app_settings)) {
-            startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
-        }
-
-        addButton(leftColumn, getString(R.string.btn_open_files)) {
-            val intents = listOf(
-                // 1. Try "DocumentsUI" Go Edition (common on low-end devices)
-                Intent().setComponent(ComponentName("com.google.android.go.documentsui", "com.android.documentsui.files.FilesActivity")),
-                // 2. Try standard AOSP DocumentsUI
-                Intent().setComponent(ComponentName("com.android.documentsui", "com.android.documentsui.files.FilesActivity")),
-                // 2b. Alternative AOSP DocumentsUI launcher
-                Intent().setComponent(ComponentName("com.android.documentsui", "com.android.documentsui.LauncherActivity")),
-                // 3. Try Downloads UI
-                Intent().setComponent(ComponentName("com.android.providers.downloads.ui", "com.android.providers.downloads.ui.DownloadList")),
-                // 4. Try standard category selector (Android 10+)
+    private fun openFiles() {
+        showOperation(
+            getString(R.string.maintenance_opening_files_title),
+            getString(R.string.maintenance_opening_files_message),
+        )
+        val intents =
+            listOf(
+                // Go and AOSP DocumentsUI use different package names on production device variants.
+                Intent().setComponent(
+                    ComponentName(
+                        "com.google.android.go.documentsui",
+                        "com.android.documentsui.files.FilesActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.android.documentsui",
+                        "com.android.documentsui.files.FilesActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.android.documentsui",
+                        "com.android.documentsui.LauncherActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.android.providers.downloads.ui",
+                        "com.android.providers.downloads.ui.DownloadList",
+                    ),
+                ),
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                     Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_FILES)
-                } else null,
-                // 5. Try "Files by Google"
+                } else {
+                    null
+                },
                 packageManager.getLaunchIntentForPackage("com.google.android.apps.nbu.files"),
-                // 6. Try Manufacturer specific (Allwinner)
-                packageManager.getLaunchIntentForPackage("com.softwinner.awmanager")
+                packageManager.getLaunchIntentForPackage("com.softwinner.awmanager"),
             )
 
-            var launched = false
-            for (intent in intents) {
-                if (intent == null) continue
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                try {
-                    startActivity(intent)
-                    launched = true
-                    break
-                } catch (_: Exception) {
-                    continue
-                }
+        for (intent in intents) {
+            if (intent == null) continue
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                startActivity(intent)
+                return
+            } catch (_: Exception) {
+                continue
             }
+        }
 
-            if (!launched) {
-                // Last ditch effort: Open a picker-style view
-                try {
-                    val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        type = "*/*"
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(fallback)
+        } catch (_: Exception) {
+            showOperationFailure(getString(R.string.maintenance_no_file_manager))
+        }
+    }
+
+    private fun addGroupHeader(parent: ViewGroup, titleRes: Int) {
+        parent.addView(
+            TextView(this).apply {
+                text = getString(titleRes)
+                textSize = 16f
+                setTextColor(Color.GRAY)
+                setPadding(0, 12, 0, 8)
+            },
+        )
+    }
+
+    private fun addButton(parent: ViewGroup, labelRes: Int, onClick: () -> Unit): Button {
+        val button =
+            Button(this).apply {
+                text = getString(labelRes)
+                isAllCaps = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setPadding(32, 16, 32, 16)
+                setOnClickListener { onClick() }
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        setMargins(0, 0, 0, 10)
                     }
-                    startActivity(fallback)
-                } catch (_: Exception) {
-                    Toast.makeText(this, "No File Manager found", Toast.LENGTH_SHORT).show()
-                }
             }
-        }
-
-        root.addView(leftScroll)
-
-        // RIGHT COLUMN: App List
-        val rightColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 48, 48, 48)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.2f)
-            setBackgroundColor("#1A1A1A".toColorInt())
-        }
-
-        val appListHeader = TextView(this).apply {
-            text = getString(R.string.app_list_header)
-            textSize = 20f
-            setTextColor(Color.GRAY)
-            setPadding(0, 0, 0, 24)
-        }
-        rightColumn.addView(appListHeader)
-
-        val scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-            isVerticalScrollBarEnabled = true
-        }
-        val appListContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        scrollView.addView(appListContainer)
-        rightColumn.addView(scrollView)
-
-        populateAppList(appListContainer)
-
-        root.addView(rightColumn)
-
-        setContentView(root)
+        actionButtons += button
+        parent.addView(button)
+        return button
     }
 
     private fun showUnlockingGate() {
@@ -234,39 +350,78 @@ class KioskControlActivity : Activity() {
     }
 
     private fun confirmOwnershipRelease() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.release_device_owner_title)
-            .setMessage(R.string.release_device_owner_message)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.release_device_owner_confirm) { _, _ ->
-                showOwnershipReleaseGate()
-                LockTaskController.releaseDeviceOwner(this) { released, message ->
-                    if (released) {
-                        Toast.makeText(this, R.string.release_device_owner_success, Toast.LENGTH_LONG).show()
-                        recreate()
-                    } else {
-                        buildControls()
-                        Toast.makeText(
-                            this,
-                            getString(R.string.release_device_owner_failed, message ?: "unknown error"),
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
+        confirmAction(
+            titleRes = R.string.release_device_owner_title,
+            messageRes = R.string.release_device_owner_message,
+            confirmRes = R.string.release_device_owner_confirm,
+        ) {
+            showOperation(
+                getString(R.string.release_device_owner_working),
+                getString(R.string.release_device_owner_wait),
+                busy = true,
+            )
+            LockTaskController.releaseDeviceOwner(this) { released, message ->
+                if (isFinishing || isDestroyed) {
+                    return@releaseDeviceOwner
+                }
+                if (released) {
+                    buildControls()
+                    showOperation(
+                        getString(R.string.release_device_owner_success),
+                        getString(R.string.release_device_owner_success_message),
+                    )
+                } else {
+                    showOperationFailure(
+                        getString(
+                            R.string.release_device_owner_failed,
+                            message ?: getString(R.string.maintenance_unknown_error),
+                        ),
+                    )
                 }
             }
+        }
+    }
+
+    private fun confirmAction(
+        titleRes: Int,
+        messageRes: Int,
+        confirmRes: Int,
+        onConfirmed: () -> Unit,
+    ) {
+        AlertDialog.Builder(this)
+            .setTitle(titleRes)
+            .setMessage(messageRes)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(confirmRes) { _, _ -> onConfirmed() }
             .show()
     }
 
-    private fun showOwnershipReleaseGate() {
-        setContentView(
-            TextView(this).apply {
-                text = getString(R.string.release_device_owner_working)
-                textSize = 24f
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.BLACK)
-                gravity = Gravity.CENTER
-            },
-        )
+    private fun showOperation(
+        title: String,
+        message: String,
+        busy: Boolean = false,
+    ) {
+        operationTitleView?.apply {
+            text = title
+            setTextColor(Color.WHITE)
+        }
+        operationMessageView?.apply {
+            text = message
+            setTextColor("#D0D0D0".toColorInt())
+        }
+        actionButtons.forEach { it.isEnabled = !busy }
+    }
+
+    private fun showOperationFailure(message: String) {
+        operationTitleView?.apply {
+            text = getString(R.string.maintenance_action_failed)
+            setTextColor("#FF6B6B".toColorInt())
+        }
+        operationMessageView?.apply {
+            text = message
+            setTextColor("#FFB0B0".toColorInt())
+        }
+        actionButtons.forEach { it.isEnabled = true }
     }
 
     private fun updateStatus(view: TextView) {
@@ -277,63 +432,6 @@ class KioskControlActivity : Activity() {
             view.text = getString(R.string.maintenance_active_until, format.format(date))
         } else {
             view.text = getString(R.string.maintenance_expired)
-        }
-    }
-
-    private fun addButton(parent: ViewGroup, label: String, onClick: () -> Unit) {
-        val button = Button(this).apply {
-            text = label
-            setPadding(32, 16, 32, 16)
-            setOnClickListener { onClick() }
-            val params = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            params.setMargins(0, 0, 0, 12)
-            layoutParams = params
-        }
-        parent.addView(button)
-    }
-
-    private fun populateAppList(container: LinearLayout) {
-        val pm = packageManager
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        val apps = pm.queryIntentActivities(intent, 0)
-
-        apps.asSequence()
-            .map { it.activityInfo }
-            .filter { it.packageName != packageName }
-            .sortedBy { it.loadLabel(pm).toString().lowercase() }
-            .forEach { info ->
-                val btn = Button(this).apply {
-                    text = info.loadLabel(pm)
-                    isAllCaps = false
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    setPadding(32, 16, 32, 16)
-                    val params = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                    params.setMargins(0, 0, 0, 8)
-                    layoutParams = params
-                    setOnClickListener {
-                        KioskState.enableMaintenance(this@KioskControlActivity, KioskConfig.MAINTENANCE_DURATION_MS)
-                        launchApp(info.packageName)
-                    }
-                }
-                container.addView(btn)
-            }
-    }
-
-    private fun launchApp(packageName: String) {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-            startActivity(intent)
-        } else {
-            Toast.makeText(this, "Could not launch $packageName", Toast.LENGTH_SHORT).show()
         }
     }
 }
