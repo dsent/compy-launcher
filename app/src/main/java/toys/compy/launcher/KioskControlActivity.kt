@@ -12,6 +12,8 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -37,8 +39,11 @@ class KioskControlActivity : Activity() {
     )
 
     private val actionButtons = mutableListOf<Button>()
+    private val expiryHandler = Handler(Looper.getMainLooper())
+    private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
     private var operationTitleView: TextView? = null
     private var operationMessageView: TextView? = null
+    private var exitingMaintenance = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +70,23 @@ class KioskControlActivity : Activity() {
         }
 
         buildControls()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (LockTaskController.lockTaskModeState(this) != ActivityManager.LOCK_TASK_MODE_NONE) {
+            return
+        }
+        if (!KioskState.isMaintenanceActive(this)) {
+            exitMaintenance()
+            return
+        }
+        scheduleMaintenanceExpiry()
+    }
+
+    override fun onPause() {
+        expiryHandler.removeCallbacks(expiryRunnable)
+        super.onPause()
     }
 
     private fun buildControls() {
@@ -208,12 +230,33 @@ class KioskControlActivity : Activity() {
     }
 
     private fun exitMaintenance() {
+        if (exitingMaintenance) return
+        exitingMaintenance = true
+        expiryHandler.removeCallbacks(expiryRunnable)
         KioskState.disableMaintenance(this)
         val launcherIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         startActivity(launcherIntent)
         finish()
+    }
+
+    private fun scheduleMaintenanceExpiry() {
+        expiryHandler.removeCallbacks(expiryRunnable)
+        val remainingMs = KioskState.getMaintenanceUntil(this) - System.currentTimeMillis()
+        if (remainingMs <= 0) {
+            expiryHandler.post(expiryRunnable)
+        } else {
+            expiryHandler.postDelayed(expiryRunnable, remainingMs)
+        }
+    }
+
+    private fun handleMaintenanceExpiry() {
+        if (KioskState.isMaintenanceActive(this)) {
+            scheduleMaintenanceExpiry()
+        } else {
+            exitMaintenance()
+        }
     }
 
     private fun openAndroidSettings() {
