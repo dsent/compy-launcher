@@ -10,7 +10,11 @@ import android.app.ActivityManager
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -26,9 +30,11 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.graphics.toColorInt
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class KioskControlActivity : Activity() {
     private data class MaintenanceAction(
@@ -44,6 +50,7 @@ class KioskControlActivity : Activity() {
     private val actionButtons = mutableListOf<Button>()
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
+    private val maintenanceExecutor = Executors.newSingleThreadExecutor()
     private var maintenanceStatusView: TextView? = null
     private var operationTitleView: TextView? = null
     private var operationMessageView: TextView? = null
@@ -92,6 +99,11 @@ class KioskControlActivity : Activity() {
     override fun onPause() {
         expiryHandler.removeCallbacks(expiryRunnable)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        maintenanceExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -250,6 +262,13 @@ class KioskControlActivity : Activity() {
                     R.string.maintenance_group_compy,
                     listOf(
                         MaintenanceAction(R.string.btn_exit_maintenance, ::exitMaintenance),
+                    ),
+                ),
+                MaintenanceGroup(
+                    R.string.maintenance_group_backup,
+                    listOf(
+                        MaintenanceAction(R.string.btn_create_backup, ::confirmCreateBackup),
+                        MaintenanceAction(R.string.btn_restore_backup, ::chooseBackupToRestore),
                     ),
                 ),
                 MaintenanceGroup(
@@ -416,6 +435,172 @@ class KioskControlActivity : Activity() {
         }
     }
 
+    private fun confirmCreateBackup() {
+        confirmAction(
+            titleRes = R.string.create_backup_title,
+            messageRes = R.string.create_backup_message,
+            confirmRes = R.string.create_backup_confirm,
+        ) {
+            showOperation(
+                getString(R.string.create_backup_working),
+                getString(R.string.create_backup_wait),
+                busy = true,
+            )
+            runMaintenanceOperation(
+                operation = {
+                    backupStore().createBackup(installedApkSnapshots())
+                },
+                onSuccess = { result ->
+                    showOperation(
+                        getString(R.string.create_backup_success),
+                        getString(
+                            R.string.create_backup_success_message,
+                            result.backupSet.ordinal,
+                            result.projectEntries,
+                            result.retainedSets,
+                        ),
+                    )
+                },
+            )
+        }
+    }
+
+    private fun chooseBackupToRestore() {
+        showOperation(
+            getString(R.string.restore_backup_loading),
+            getString(R.string.restore_backup_loading_message),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = {
+                val store = backupStore()
+                store to store.listBackupSets()
+            },
+            onSuccess = { (store, backupSets) ->
+                if (backupSets.isEmpty()) {
+                    showOperation(
+                        getString(R.string.restore_backup_none),
+                        getString(R.string.restore_backup_none_message),
+                    )
+                    return@runMaintenanceOperation
+                }
+
+                showOperation(
+                    getString(R.string.restore_backup_choose),
+                    getString(R.string.restore_backup_choose_message),
+                )
+                val labels = backupSets.map { getString(R.string.restore_backup_set_label, it.ordinal) }
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.restore_backup_choose)
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        confirmRestoreBackup(store, backupSets[which])
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            },
+        )
+    }
+
+    private fun confirmRestoreBackup(store: CompyBackupStore, backupSet: CompyBackupSet) {
+        confirmAction(
+            title = getString(R.string.restore_backup_title, backupSet.ordinal),
+            message = getString(R.string.restore_backup_message),
+            confirm = getString(R.string.restore_backup_confirm),
+        ) {
+            showOperation(
+                getString(R.string.restore_backup_working, backupSet.ordinal),
+                getString(R.string.restore_backup_wait),
+                busy = true,
+            )
+            runMaintenanceOperation(
+                operation = { store.restoreProjects(backupSet) },
+                onSuccess = { result ->
+                    showOperation(
+                        getString(R.string.restore_backup_success),
+                        getString(
+                            R.string.restore_backup_success_message,
+                            backupSet.ordinal,
+                            result.restoredEntries,
+                            result.preservedEntries,
+                        ),
+                    )
+                },
+            )
+        }
+    }
+
+    private fun backupStore(): CompyBackupStore {
+        return CompyBackupStore(CompyStorage.removableCompyDirectory(this))
+    }
+
+    private fun installedApkSnapshots(): List<InstalledApkSnapshot> {
+        return listOf(KioskConfig.TARGET_PACKAGE, KioskConfig.LAUNCHER_PACKAGE).map { packageName ->
+            val applicationInfo = installedApplicationInfo(packageName)
+            if (!applicationInfo.splitSourceDirs.isNullOrEmpty()) {
+                throw IllegalStateException("Split APKs are not supported for $packageName")
+            }
+            val packageInfo = installedPackageInfo(packageName)
+            InstalledApkSnapshot(
+                packageName = packageName,
+                versionName = packageInfo.versionName ?: "unknown",
+                versionCode =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        packageInfo.longVersionCode
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageInfo.versionCode.toLong()
+                    },
+                sourceApk = File(applicationInfo.sourceDir),
+            )
+        }
+    }
+
+    private fun installedApplicationInfo(packageName: String): ApplicationInfo {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getApplicationInfo(
+                packageName,
+                PackageManager.ApplicationInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getApplicationInfo(packageName, 0)
+        }
+    }
+
+    private fun installedPackageInfo(packageName: String): PackageInfo {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(
+                packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
+    }
+
+    private fun <T> runMaintenanceOperation(
+        operation: () -> T,
+        onSuccess: (T) -> Unit,
+    ) {
+        maintenanceExecutor.execute {
+            try {
+                val result = operation()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) onSuccess(result)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        showOperationFailure(
+                            error.message ?: getString(R.string.maintenance_unknown_error),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun addGroupHeader(parent: ViewGroup, titleRes: Int) {
         parent.addView(
             TextView(this).apply {
@@ -512,11 +697,25 @@ class KioskControlActivity : Activity() {
         confirmRes: Int,
         onConfirmed: () -> Unit,
     ) {
+        confirmAction(
+            title = getString(titleRes),
+            message = getString(messageRes),
+            confirm = getString(confirmRes),
+            onConfirmed = onConfirmed,
+        )
+    }
+
+    private fun confirmAction(
+        title: String,
+        message: String,
+        confirm: String,
+        onConfirmed: () -> Unit,
+    ) {
         AlertDialog.Builder(this)
-            .setTitle(titleRes)
-            .setMessage(messageRes)
+            .setTitle(title)
+            .setMessage(message)
             .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(confirmRes) { _, _ -> onConfirmed() }
+            .setPositiveButton(confirm) { _, _ -> onConfirmed() }
             .show()
     }
 
