@@ -276,6 +276,36 @@ class KioskControlActivity : Activity() {
         if (exitingMaintenance) return
         exitingMaintenance = true
         expiryHandler.removeCallbacks(expiryRunnable)
+
+        if (LockTaskController.isDeviceOwner(this)) {
+            showOperation(
+                getString(R.string.maintenance_restarting_ide_title),
+                getString(R.string.maintenance_restarting_ide_message),
+                busy = true,
+            )
+            LockTaskController.stopTargetForRestart(this) { stopped, message ->
+                if (isFinishing || isDestroyed) {
+                    return@stopTargetForRestart
+                }
+                if (stopped) {
+                    finishMaintenanceExit()
+                } else {
+                    exitingMaintenance = false
+                    showOperationFailure(
+                        getString(
+                            R.string.maintenance_restart_ide_failed,
+                            message ?: getString(R.string.maintenance_unknown_error),
+                        ),
+                    )
+                }
+            }
+            return
+        }
+
+        finishMaintenanceExit()
+    }
+
+    private fun finishMaintenanceExit() {
         KioskState.disableMaintenance(this)
         val launcherIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)

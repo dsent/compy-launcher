@@ -64,6 +64,53 @@ object LockTaskController {
         return lockTaskModeState(context) == ActivityManager.LOCK_TASK_MODE_LOCKED
     }
 
+    /** Stops the target package without clearing its APK or app data. */
+    fun stopTargetForRestart(
+        context: Context,
+        onComplete: (Boolean, String?) -> Unit,
+    ) {
+        val appContext = context.applicationContext
+        if (!isDeviceOwner(appContext)) {
+            mainHandler.post {
+                onComplete(false, "Launcher must be Device Owner to stop the target app")
+            }
+            return
+        }
+
+        backgroundExecutor.execute {
+            val dpm = devicePolicyManager(appContext)
+            val admin = adminComponent(appContext)
+            val targetPackage = KioskConfig.TARGET_PACKAGE
+            try {
+                // Android's Device Owner hide path kills the package while preserving its APK and
+                // data. Activity teardown alone can leave a wedged native LÖVE thread running.
+                setApplicationHiddenState(dpm, admin, targetPackage, hidden = true)
+                setApplicationHiddenState(dpm, admin, targetPackage, hidden = false)
+                mainHandler.post { onComplete(true, null) }
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "Could not stop target app for restart", error)
+                val visibilityFailure =
+                    try {
+                        setApplicationHiddenState(dpm, admin, targetPackage, hidden = false)
+                        null
+                    } catch (visibilityError: RuntimeException) {
+                        Log.e(TAG, "Could not restore target app visibility", visibilityError)
+                        visibilityError.message ?: "unknown visibility error"
+                    }
+                val message =
+                    error.message ?: "Could not stop target app for restart"
+                mainHandler.post {
+                    onComplete(
+                        false,
+                        visibilityFailure?.let {
+                            "$message; the target app may remain hidden: $it"
+                        } ?: message,
+                    )
+                }
+            }
+        }
+    }
+
     /**
      * Applies owner policy and launches the target inside LockTask.
      * Returns false when this package is not Device Owner so callers can retain soft-kiosk behavior.
@@ -335,6 +382,22 @@ object LockTaskController {
             homeFilter,
             ComponentName(context, MainActivity::class.java),
         )
+    }
+
+    private fun setApplicationHiddenState(
+        dpm: DevicePolicyManager,
+        admin: ComponentName,
+        packageName: String,
+        hidden: Boolean,
+    ) {
+        if (dpm.isApplicationHidden(admin, packageName) == hidden) {
+            return
+        }
+        val changed = dpm.setApplicationHidden(admin, packageName, hidden)
+        if (!changed || dpm.isApplicationHidden(admin, packageName) != hidden) {
+            val state = if (hidden) "hide" else "unhide"
+            throw IllegalStateException("Android could not $state $packageName")
+        }
     }
 
     private fun beginOperation(): Int {

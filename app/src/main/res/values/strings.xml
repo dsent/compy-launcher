@@ -18,6 +18,9 @@
     <string name="maintenance_action_failed">Action failed</string>
     <string name="maintenance_open_failed">Android could not open this screen.</string>
     <string name="maintenance_unknown_error">unknown error</string>
+    <string name="maintenance_restarting_ide_title">Restarting Compy IDE…</string>
+    <string name="maintenance_restarting_ide_message">Stopping the current runtime before kiosk mode resumes.</string>
+    <string name="maintenance_restart_ide_failed">Could not restart Compy IDE.\n\n%1$s</string>
     <string name="maintenance_opening_settings_title">Android Settings</string>
     <string name="maintenance_opening_settings_message">Use Back to return to maintenance mode.</string>
     <string name="maintenance_opening_files_title">Files</string>
