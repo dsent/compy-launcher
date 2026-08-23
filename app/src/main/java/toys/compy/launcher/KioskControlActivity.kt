@@ -16,6 +16,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -41,9 +43,11 @@ class KioskControlActivity : Activity() {
     private val actionButtons = mutableListOf<Button>()
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
+    private var maintenanceStatusView: TextView? = null
     private var operationTitleView: TextView? = null
     private var operationMessageView: TextView? = null
     private var exitingMaintenance = false
+    private var operationInProgress = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,6 +93,41 @@ class KioskControlActivity : Activity() {
         super.onPause()
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) recordMaintenanceInteraction()
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (
+            event.actionMasked == MotionEvent.ACTION_DOWN ||
+            event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS
+        ) {
+            recordMaintenanceInteraction()
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        // Pointer hover and movement must not keep an unattended maintenance session alive.
+        if (
+            event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
+            event.actionMasked == MotionEvent.ACTION_SCROLL
+        ) {
+            recordMaintenanceInteraction()
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    private fun recordMaintenanceInteraction() {
+        if (
+            !exitingMaintenance &&
+            LockTaskController.lockTaskModeState(this) == ActivityManager.LOCK_TASK_MODE_NONE
+        ) {
+            rearmMaintenanceExpiry()
+        }
+    }
+
     private fun buildControls() {
         actionButtons.clear()
 
@@ -118,13 +157,16 @@ class KioskControlActivity : Activity() {
             },
         )
 
-        val statusView = TextView(this).apply {
-            setTextColor(Color.YELLOW)
-            textSize = 14f
-            setPadding(0, 0, 0, 20)
+        maintenanceStatusView =
+            TextView(this).apply {
+                setTextColor(Color.YELLOW)
+                textSize = 14f
+                setPadding(0, 0, 0, 20)
+            }
+        maintenanceStatusView?.let { statusView ->
+            updateStatus(statusView)
+            actionColumn.addView(statusView)
         }
-        updateStatus(statusView)
-        actionColumn.addView(statusView)
 
         var firstButton: Button? = null
         maintenanceGroups().forEach { group ->
@@ -251,8 +293,16 @@ class KioskControlActivity : Activity() {
         }
     }
 
+    private fun rearmMaintenanceExpiry() {
+        KioskState.enableMaintenance(this, KioskConfig.MAINTENANCE_DURATION_MS)
+        maintenanceStatusView?.let(::updateStatus)
+        scheduleMaintenanceExpiry()
+    }
+
     private fun handleMaintenanceExpiry() {
-        if (KioskState.isMaintenanceActive(this)) {
+        if (operationInProgress) {
+            rearmMaintenanceExpiry()
+        } else if (KioskState.isMaintenanceActive(this)) {
             scheduleMaintenanceExpiry()
         } else {
             exitMaintenance()
@@ -444,6 +494,11 @@ class KioskControlActivity : Activity() {
         message: String,
         busy: Boolean = false,
     ) {
+        val operationFinished = operationInProgress && !busy
+        operationInProgress = busy
+        if (busy || operationFinished) {
+            rearmMaintenanceExpiry()
+        }
         operationTitleView?.apply {
             text = title
             setTextColor(Color.WHITE)
@@ -456,6 +511,8 @@ class KioskControlActivity : Activity() {
     }
 
     private fun showOperationFailure(message: String) {
+        operationInProgress = false
+        rearmMaintenanceExpiry()
         operationTitleView?.apply {
             text = getString(R.string.maintenance_action_failed)
             setTextColor("#FF6B6B".toColorInt())
