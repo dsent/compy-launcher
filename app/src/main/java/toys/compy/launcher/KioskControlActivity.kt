@@ -14,6 +14,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
@@ -285,7 +286,7 @@ class KioskControlActivity : Activity() {
 
     private fun scheduleMaintenanceExpiry() {
         expiryHandler.removeCallbacks(expiryRunnable)
-        val remainingMs = KioskState.getMaintenanceUntil(this) - System.currentTimeMillis()
+        val remainingMs = KioskState.getMaintenanceDeadline(this) - SystemClock.elapsedRealtime()
         if (remainingMs <= 0) {
             expiryHandler.post(expiryRunnable)
         } else {
@@ -525,9 +526,10 @@ class KioskControlActivity : Activity() {
     }
 
     private fun updateStatus(view: TextView) {
-        val until = KioskState.getMaintenanceUntil(this)
-        if (System.currentTimeMillis() < until) {
-            val date = Date(until)
+        val remainingMs = KioskState.getMaintenanceDeadline(this) - SystemClock.elapsedRealtime()
+        if (remainingMs > 0) {
+            // Wall time is presentation only; expiry remains monotonic.
+            val date = Date(System.currentTimeMillis() + remainingMs)
             val format = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             view.text = getString(R.string.maintenance_active_until, format.format(date))
         } else {

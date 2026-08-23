@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -94,7 +95,7 @@ class MainActivity : Activity() {
     private fun scheduleLaunch() {
         handler.removeCallbacks(launchRunnable)
 
-        val now = System.currentTimeMillis()
+        val now = SystemClock.elapsedRealtime()
         val timeSinceLastLaunch = now - lastLaunchAttemptTime
 
         var delay = KioskConfig.NORMAL_LAUNCH_DELAY_MS
@@ -116,7 +117,7 @@ class MainActivity : Activity() {
             return
         }
 
-        lastLaunchAttemptTime = System.currentTimeMillis()
+        lastLaunchAttemptTime = SystemClock.elapsedRealtime()
         val ownerLaunchStarted =
             LockTaskController.armAndLaunchTarget(this) { message ->
                 Log.e(TAG, message)
