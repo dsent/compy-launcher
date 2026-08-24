@@ -108,7 +108,20 @@ class KioskControlActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) recordMaintenanceInteraction()
+        if (
+            event.action == KeyEvent.ACTION_UP &&
+            event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
+            !event.isCanceled
+        ) {
+            onBackPressed()
+            return true
+        }
         return super.dispatchKeyEvent(event)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        exitMaintenance()
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
