@@ -14,7 +14,9 @@ object KioskConfig {
     const val TARGET_PACKAGE = "toys.compy.ide"
     val LOCK_TASK_PACKAGES = arrayOf(LAUNCHER_PACKAGE, TARGET_PACKAGE)
     @TargetApi(Build.VERSION_CODES.P)
-    const val LOCK_TASK_FEATURES = DevicePolicyManager.LOCK_TASK_FEATURE_HOME
+    const val LOCK_TASK_FEATURES =
+        DevicePolicyManager.LOCK_TASK_FEATURE_HOME or
+            DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS
     const val LOCK_TASK_CONFIRM_INTERVAL_MS = 100L
     const val LOCK_TASK_CONFIRM_TIMEOUT_MS = 4000L
     const val NORMAL_LAUNCH_DELAY_MS = 2500L
