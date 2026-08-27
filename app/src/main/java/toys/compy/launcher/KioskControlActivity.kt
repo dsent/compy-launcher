@@ -31,6 +31,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.graphics.toColorInt
 import java.io.File
+import java.io.IOException
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -454,27 +456,58 @@ class KioskControlActivity : Activity() {
             messageRes = R.string.create_backup_message,
             confirmRes = R.string.create_backup_confirm,
         ) {
-            showOperation(
-                getString(R.string.create_backup_working),
-                getString(R.string.create_backup_wait),
-                busy = true,
-            )
-            runMaintenanceOperation(
-                operation = {
-                    backupStore().createBackup(installedApkSnapshots())
-                },
-                onSuccess = { result ->
-                    showOperation(
-                        getString(R.string.create_backup_success),
-                        getString(
-                            R.string.create_backup_success_message,
-                            result.backupSet.ordinal,
-                            result.projectEntries,
-                            result.retainedSets,
-                        ),
-                    )
-                },
-            )
+            runCreateBackup()
+        }
+    }
+
+    private fun runCreateBackup(confirmedBusyLocks: List<ObservedBackupLock> = emptyList()) {
+        showOperation(
+            getString(R.string.create_backup_working),
+            getString(R.string.create_backup_wait),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = {
+                backupStore().createBackup(installedApkSnapshots(), confirmedBusyLocks)
+            },
+            onSuccess = { result ->
+                showOperation(
+                    getString(R.string.create_backup_success),
+                    getString(
+                        R.string.create_backup_success_message,
+                        result.backupSet.ordinal,
+                        result.projectEntries,
+                        result.retainedSets,
+                    ),
+                )
+            },
+            onFailure = { error ->
+                if (error is BackupStoreBusyException) {
+                    confirmBreakBackupLocks(error.busyLocks)
+                } else {
+                    showOperationFailure(error.message ?: getString(R.string.maintenance_unknown_error))
+                }
+            },
+        )
+    }
+
+    private fun confirmBreakBackupLocks(locks: List<ObservedBackupLock>) {
+        val details =
+            locks.joinToString("\n\n") { lock ->
+                val destination =
+                    when (lock.destination.kind) {
+                        BackupSourceKind.CARD -> "SD card ${lock.destination.id.removePrefix(CompyStorageContract.CARD_ID_PREFIX)}"
+                        BackupSourceKind.INTERNAL -> "internal ${lock.destination.id.take(8)}"
+                    }
+                "$destination\nWriter: ${lock.writer ?: "unknown"}\nOperation: ${lock.operationId ?: "unreadable"}\nSource: ${lock.sourceKind ?: "unknown"} ${lock.sourceId ?: "unknown"}"
+            }
+        showOperation(getString(R.string.create_backup_busy_title), details)
+        confirmAction(
+            title = getString(R.string.create_backup_busy_title),
+            message = details,
+            confirm = getString(R.string.create_backup_busy_confirm),
+        ) {
+            runCreateBackup(locks)
         }
     }
 
@@ -502,7 +535,7 @@ class KioskControlActivity : Activity() {
                     getString(R.string.restore_backup_choose),
                     getString(R.string.restore_backup_choose_message),
                 )
-                val labels = backupSets.map { getString(R.string.restore_backup_set_label, it.ordinal) }
+                val labels = backupSets.map(::snapshotDisplayLabel)
                 AlertDialog.Builder(this)
                     .setTitle(R.string.restore_backup_choose)
                     .setItems(labels.toTypedArray()) { _, which ->
@@ -542,8 +575,39 @@ class KioskControlActivity : Activity() {
         }
     }
 
+    private fun snapshotDisplayLabel(snapshot: CompyBackupSet): String {
+        val source =
+            when (snapshot.sourceKind) {
+                BackupSourceKind.CARD -> "SD card ${snapshot.sourceId.removePrefix(CompyStorageContract.CARD_ID_PREFIX)}"
+                BackupSourceKind.INTERNAL -> "internal ${snapshot.sourceId.take(8)}"
+            }
+        val timestamp = snapshot.createdAt ?: "legacy"
+        val details = snapshot.label?.let { "$it · $timestamp" } ?: timestamp
+        return getString(R.string.restore_backup_set_label, snapshot.ordinal, source, details)
+    }
+
     private fun backupStore(): CompyBackupStore {
-        return CompyBackupStore(CompyStorage.removableCompyDirectory(this))
+        val card = CompyStorage.removableStorage(this)
+        val internal = CompyStorage.internalStorage(this)
+        val cardEndpoint =
+            BackupStorageEndpoint(
+                kind = BackupSourceKind.CARD,
+                id = card.id,
+                compyDirectory = card.compyDirectory,
+            )
+        return CompyBackupStore(
+            source = cardEndpoint,
+            destinationEndpoints =
+                listOf(
+                    cardEndpoint,
+                    BackupStorageEndpoint(
+                        kind = BackupSourceKind.INTERNAL,
+                        id = internal.id,
+                        compyDirectory = internal.compyDirectory,
+                    ),
+                ),
+            apkInspector = ApkArchiveInspector(::inspectApkArchive),
+        )
     }
 
     private fun installedApkSnapshots(): List<InstalledApkSnapshot> {
@@ -555,17 +619,27 @@ class KioskControlActivity : Activity() {
             val packageInfo = installedPackageInfo(packageName)
             InstalledApkSnapshot(
                 packageName = packageName,
-                versionName = packageInfo.versionName ?: "unknown",
-                versionCode =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        packageInfo.longVersionCode
-                    } else {
-                        @Suppress("DEPRECATION")
-                        packageInfo.versionCode.toLong()
-                    },
+                versionName = packageInfo.versionName
+                    ?: throw IllegalStateException("Installed package has no version name: $packageName"),
+                versionCode = packageVersionCode(packageInfo),
                 sourceApk = File(applicationInfo.sourceDir),
+                debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
+                signingCertificateSha256 = signingCertificateSha256(packageInfo),
             )
         }
+    }
+
+    private fun inspectApkArchive(apk: File): ApkArchiveMetadata {
+        val packageInfo = archivedPackageInfo(apk)
+        val applicationInfo = packageInfo.applicationInfo
+            ?: throw IOException("APK has no application metadata: $apk")
+        return ApkArchiveMetadata(
+            packageName = packageInfo.packageName,
+            versionName = packageInfo.versionName ?: throw IOException("APK has no version name: $apk"),
+            versionCode = packageVersionCode(packageInfo),
+            debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
+            signingCertificateSha256 = signingCertificateSha256(packageInfo),
+        )
     }
 
     private fun installedApplicationInfo(packageName: String): ApplicationInfo {
@@ -584,17 +658,64 @@ class KioskControlActivity : Activity() {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getPackageInfo(
                 packageName,
-                PackageManager.PackageInfoFlags.of(0),
+                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
             )
         } else {
             @Suppress("DEPRECATION")
-            packageManager.getPackageInfo(packageName, 0)
+            packageManager.getPackageInfo(packageName, packageSignatureFlags())
         }
+    }
+
+    private fun archivedPackageInfo(apk: File): PackageInfo {
+        val packageInfo =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageArchiveInfo(
+                    apk.path,
+                    PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageArchiveInfo(apk.path, packageSignatureFlags())
+            }
+        return packageInfo ?: throw IOException("Could not parse APK metadata: $apk")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun packageSignatureFlags(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+
+    @Suppress("DEPRECATION")
+    private fun packageVersionCode(packageInfo: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            packageInfo.versionCode.toLong()
+        }
+
+    @Suppress("DEPRECATION")
+    private fun signingCertificateSha256(packageInfo: PackageInfo): String {
+        val signatures =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                packageInfo.signatures
+            }
+        if (signatures == null || signatures.size != 1) {
+            throw IOException("Package must have exactly one signing certificate: ${packageInfo.packageName}")
+        }
+        return MessageDigest.getInstance("SHA-256")
+            .digest(signatures.single().toByteArray())
+            .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
     }
 
     private fun <T> runMaintenanceOperation(
         operation: () -> T,
         onSuccess: (T) -> Unit,
+        onFailure: ((Exception) -> Unit)? = null,
     ) {
         maintenanceExecutor.execute {
             try {
@@ -605,9 +726,10 @@ class KioskControlActivity : Activity() {
             } catch (error: Exception) {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
-                        showOperationFailure(
-                            error.message ?: getString(R.string.maintenance_unknown_error),
-                        )
+                        onFailure?.invoke(error)
+                            ?: showOperationFailure(
+                                error.message ?: getString(R.string.maintenance_unknown_error),
+                            )
                     }
                 }
             }

@@ -10,8 +10,8 @@ import android.app.admin.DevicePolicyManager
 import android.os.Build
 
 object KioskConfig {
-    const val LAUNCHER_PACKAGE = "toys.compy.launcher"
-    const val TARGET_PACKAGE = "toys.compy.ide"
+    const val LAUNCHER_PACKAGE = CompyStorageContract.LAUNCHER_PACKAGE
+    const val TARGET_PACKAGE = CompyStorageContract.IDE_PACKAGE
     val LOCK_TASK_PACKAGES = arrayOf(LAUNCHER_PACKAGE, TARGET_PACKAGE)
     @TargetApi(Build.VERSION_CODES.P)
     const val LOCK_TASK_FEATURES =

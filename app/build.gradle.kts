@@ -107,9 +107,15 @@ gradle.taskGraph.whenReady {
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
+            val derivedOutput =
+                if (variant.buildType == "debug") {
+                    "toys.compy.launcher-debug-${output.versionName.get()}.apk"
+                } else {
+                    "toys.compy.launcher-${output.versionName.get()}.apk"
+                }
             output.outputFileName.set(
                 buildOutputApk
-                    ?: "toys.compy.launcher-${output.versionName.get()}.apk"
+                    ?: derivedOutput
             )
         }
     }
@@ -119,6 +125,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }
