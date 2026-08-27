@@ -12,6 +12,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.math.BigInteger
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -1663,14 +1664,17 @@ class CompyBackupStore(
     }
 
     private fun nextOldPath(target: File): File {
-        val direct = File(target.parentFile, "${target.name}.old")
+        val parent = target.parentFile ?: throw IOException("Project target has no parent: $target")
+        val direct = File(parent, "${target.name}.old")
         if (!direct.exists()) return direct
-        var suffix = 1
-        while (true) {
-            val candidate = File(target.parentFile, "${target.name}.old.$suffix")
-            if (!candidate.exists()) return candidate
-            suffix += 1
-        }
+        val suffixPattern = Regex("^${Regex.escape(target.name)}[.]old[.]([1-9][0-9]*)$")
+        val siblings = parent.listFiles()
+            ?: throw IOException("Could not read projects directory: $parent")
+        val largestSuffix =
+            siblings.mapNotNull { sibling ->
+                suffixPattern.matchEntire(sibling.name)?.groupValues?.get(1)?.let(::BigInteger)
+            }.maxOrNull() ?: BigInteger.ZERO
+        return File(parent, "${target.name}.old.${largestSuffix + BigInteger.ONE}")
     }
 
     private fun ensureDirectory(directory: File) {

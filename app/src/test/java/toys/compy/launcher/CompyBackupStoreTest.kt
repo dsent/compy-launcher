@@ -245,6 +245,23 @@ class CompyBackupStoreTest {
     }
 
     @Test
+    fun restoreAllocatesPreservedTargetAfterLargestSuffixWithoutReusingGaps() {
+        val fixture = Fixture(temporaryFolder.newFolder())
+        fixture.writeProject("alpha", "snapshot")
+        val backup = fixture.store().createBackup(fixture.installedApks("1")).backupSet
+        fixture.writeProject("alpha", "live")
+        File(fixture.projects, "alpha.old").mkdirs()
+        File(fixture.projects, "alpha.old/main.lua").writeText("oldest")
+        File(fixture.projects, "alpha.old.2").mkdirs()
+        File(fixture.projects, "alpha.old.2/main.lua").writeText("newer")
+
+        fixture.store().restoreProject(backup, "alpha")
+
+        assertFalse(File(fixture.projects, "alpha.old.1").exists())
+        assertEquals("live", File(fixture.projects, "alpha.old.3/main.lua").readText())
+    }
+
+    @Test
     fun restoreRecoveryRetriesAfterOldTargetWasPreserved() {
         val fixture = Fixture(temporaryFolder.newFolder())
         fixture.writeProject("alpha", "live")
