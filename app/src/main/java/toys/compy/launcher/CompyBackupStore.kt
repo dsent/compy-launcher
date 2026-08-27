@@ -298,9 +298,13 @@ class CompyBackupStore(
                     verifyFile(target, sourceFile.entry.size, sourceFile.entry.sha256)
                 }
                 writeBytesDurably(File(staging, MANIFEST_FILE_NAME), manifestBytes)
-                assertOwnsAll(ownedLocks)
-
-                val promoted = promoteSnapshot(staging, File(sourceSnapshots, finalName), manifest)
+                val promoted =
+                    promoteSnapshot(
+                        staging,
+                        File(sourceSnapshots, finalName),
+                        manifest,
+                        ownedLocks,
+                    )
                 ownedStages.remove(staging)
                 completedCopies +=
                     CompyBackupSet(
@@ -327,12 +331,10 @@ class CompyBackupStore(
                 }
 
             destinations.forEach { destination ->
-                assertOwnsAll(ownedLocks)
-                pruneSnapshots(destination)
+                pruneSnapshots(destination, ownedLocks)
             }
             destinations.forEach { destination ->
-                assertOwnsAll(ownedLocks)
-                cleanupApkArchive(destination)
+                cleanupApkArchive(destination, ownedLocks)
             }
 
             val retainedCount =
@@ -750,12 +752,14 @@ class CompyBackupStore(
             copyFileDurably(apk.source, staging)
             ownedStages += staging
             verifyArchivedApk(staging, apk.entry)
-            assertOwnsAll(ownedLocks)
             if (final.exists()) {
                 verifyArchivedApk(final, apk.entry)
                 deleteTreeChecked(staging)
-            } else if (!staging.renameTo(final)) {
-                throw IOException("Could not promote APK archive entry: $final")
+            } else {
+                assertOwnsAll(ownedLocks)
+                if (!staging.renameTo(final)) {
+                    throw IOException("Could not promote APK archive entry: $final")
+                }
             }
             ownedStages.remove(staging)
         }
@@ -765,8 +769,10 @@ class CompyBackupStore(
         staging: File,
         final: File,
         manifest: SnapshotManifest,
+        ownedLocks: List<OwnedBackupLock>,
     ): File {
         if (!final.exists()) {
+            assertOwnsAll(ownedLocks)
             if (!staging.renameTo(final)) throw IOException("Could not finalize snapshot ${manifest.ordinal}")
             return final
         }
@@ -795,6 +801,7 @@ class CompyBackupStore(
             deleteTreeChecked(staging)
             return recovered
         }
+        assertOwnsAll(ownedLocks)
         if (!staging.renameTo(recovered)) throw IOException("Could not park collided snapshot: $recovered")
         return recovered
     }
@@ -874,7 +881,10 @@ class CompyBackupStore(
         }
     }
 
-    private fun pruneSnapshots(destination: BackupStorageEndpoint) {
+    private fun pruneSnapshots(
+        destination: BackupStorageEndpoint,
+        ownedLocks: List<OwnedBackupLock>,
+    ) {
         val sourceDirectory = sourceSnapshotsDirectory(destination)
         val readableUnpinned = mutableListOf<CompyBackupSet>()
         sourceDirectory.listFiles()?.forEach { directory ->
@@ -887,11 +897,15 @@ class CompyBackupStore(
             }
         }
         readableUnpinned.sortedByDescending { it.ordinal }.drop(retentionLimit).forEach { snapshot ->
+            assertOwnsAll(ownedLocks)
             deleteTreeChecked(snapshot.directory)
         }
     }
 
-    private fun cleanupApkArchive(destination: BackupStorageEndpoint) {
+    private fun cleanupApkArchive(
+        destination: BackupStorageEndpoint,
+        ownedLocks: List<OwnedBackupLock>,
+    ) {
         val archive = File(backupsDirectory(destination), APK_DIRECTORY_NAME)
         if (!archive.isDirectory) return
         val referenced = mutableSetOf<String>()
@@ -907,8 +921,8 @@ class CompyBackupStore(
                         val manifest =
                             try {
                                 decodeManifest(readBytes(File(snapshot, MANIFEST_FILE_NAME)))
-                            } catch (_: Exception) {
-                                return
+                            } catch (error: Exception) {
+                                throw IOException("Retained snapshot manifest is unreadable: $snapshot", error)
                             }
                         manifest.apks.forEach { referenced += it.fileName }
                     }
@@ -919,6 +933,7 @@ class CompyBackupStore(
             ?.filter { it.isFile && it.name.endsWith(".apk") && !it.name.startsWith(INCOMING_PREFIX) }
             ?.filterNot { it.name in referenced }
             ?.forEach { apk ->
+                assertOwnsAll(ownedLocks)
                 if (!apk.delete()) throw IOException("Could not remove unreferenced APK: $apk")
             }
     }
