@@ -109,6 +109,23 @@ class CompyBackupStoreTest {
     }
 
     @Test
+    fun busyResultExcludesTheAbortingOperationsOwnLocks() {
+        val fixture = Fixture(temporaryFolder.newFolder())
+        fixture.writeProject("alpha", "one")
+        val foreignLock = File(fixture.internalCompy, "backups/.locks/store")
+        foreignLock.parentFile!!.mkdirs()
+        foreignLock.writeText("foreign owner")
+
+        val busy = expectThrows<BackupStoreBusyException> {
+            fixture.store().createBackup(fixture.installedApks("1"))
+        }
+
+        assertEquals(listOf(fixture.internalDestination), busy.busyLocks.map { it.destination })
+        assertFalse(File(fixture.cardCompy, "backups/.locks/store").exists())
+        assertEquals("foreign owner", foreignLock.readText())
+    }
+
+    @Test
     fun lockOwnershipLossAbortsAndLeavesForeignMarker() {
         val fixture = Fixture(temporaryFolder.newFolder())
         fixture.writeProject("alpha", "one")
@@ -205,7 +222,7 @@ class CompyBackupStoreTest {
     }
 
     @Test
-    fun unreadableSnapshotBlocksApkGarbageCollectionAndHashTamperingBlocksListing() {
+    fun cleanupStopsConservativelyAndDamagedSnapshotsRemainVisible() {
         val fixture = Fixture(temporaryFolder.newFolder())
         fixture.writeProject("alpha", "one")
         val store = fixture.store()
@@ -213,13 +230,20 @@ class CompyBackupStoreTest {
         val staleApk = File(fixture.cardCompy, "backups/apk/unreferenced.apk")
         staleApk.writeText("keep conservatively")
         File(fixture.cardCompy, "backups/snapshots/card/7aff-7538/90-19700101-000000").mkdirs()
+        File(fixture.cardCompy, "backups/snapshots/internal").writeText("unreadable subtree")
         fixture.writeProject("alpha", "two")
-        expectThrows<IOException> { store.createBackup(fixture.installedApks("2")) }
+        val second = store.createBackup(fixture.installedApks("2"))
+
+        assertEquals(91L, second.backupSet.ordinal)
+        assertTrue(second.cleanupWarnings.isNotEmpty())
         assertTrue(staleApk.isFile)
 
         val project = File(first.backupSet.directory, "projects/alpha/main.lua")
         project.writeText("tampered")
-        expectThrows<IOException> { store.listBackupSets() }
+        val listed = store.listBackupSets()
+        assertTrue(listed.any { it.restorable })
+        assertTrue(listed.any { !it.restorable && it.problem?.isNotBlank() == true })
+        expectThrows<IOException> { store.restoreProjects(listed.first { !it.restorable }) }
     }
 
     @Test
@@ -295,7 +319,7 @@ class CompyBackupStoreTest {
                 )
         File(fixture.projects, ".restore.$operation.json").writeText(journal.toString())
 
-        fixture.store().recoverPendingRestores()
+        CompyBackupStore.recoverPendingRestoresOnStartup(fixture.cardDestination)
 
         assertEquals("snapshot", File(fixture.projects, "alpha/main.lua").readText())
         assertEquals("live", File(fixture.projects, "alpha.old/main.lua").readText())

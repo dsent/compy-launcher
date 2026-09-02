@@ -37,8 +37,14 @@
     <string name="create_backup_wait">Copying programs and installed apps from this SD card to the SD card and internal storage. Maintenance actions remain disabled until the snapshot is complete.</string>
     <string name="create_backup_success">Snapshot complete</string>
     <string name="create_backup_success_message">Snapshot #%1$d contains %2$d programs and both installed APKs. %3$d snapshot copies are retained for this card.</string>
+    <string name="create_backup_cleanup_warning">Automatic cleanup stopped on %1$d storage location(s). The completed snapshot and existing backup data were kept.</string>
     <string name="create_backup_busy_title">Snapshot store is busy</string>
     <string name="create_backup_busy_confirm">Break lock and continue</string>
+    <string name="create_backup_adopt_internal_title">Internal identity required</string>
+    <string name="create_backup_adopt_internal_message">Internal storage has no Compy device identity. Create device ID %1$s for hardware serial %2$s, then continue creating the snapshot?</string>
+    <string name="create_backup_adopt_internal_confirm">Create identity and continue</string>
+    <string name="create_backup_adopt_internal_working">Creating internal identity…</string>
+    <string name="create_backup_adopt_internal_wait">Writing and verifying the internal device identity before the snapshot continues.</string>
     <string name="restore_backup_loading">Reading snapshots…</string>
     <string name="restore_backup_loading_message">Checking complete snapshots on the SD card and internal storage.</string>
     <string name="restore_backup_none">No snapshot available</string>
@@ -46,6 +52,9 @@
     <string name="restore_backup_choose">Choose a snapshot</string>
     <string name="restore_backup_choose_message">Snapshot numbers increase for each source. The highest number for a source is listed first.</string>
     <string name="restore_backup_set_label">Snapshot #%1$d — %2$s — %3$s</string>
+    <string name="restore_backup_unavailable_set_label">UNAVAILABLE — %1$s — %2$s</string>
+    <string name="restore_backup_unavailable">Snapshot unavailable</string>
+    <string name="restore_backup_unavailable_message">This snapshot is damaged or unreadable and cannot be restored. %1$s</string>
     <string name="restore_backup_title">Restore snapshot #%1$d?</string>
     <string name="restore_backup_message">Programs in this snapshot replace programs with the same name. Every replaced program is preserved with an .old name. Other programs remain in place.</string>
     <string name="restore_backup_confirm">Restore projects</string>

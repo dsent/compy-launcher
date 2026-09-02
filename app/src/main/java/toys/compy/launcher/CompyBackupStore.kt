@@ -114,6 +114,8 @@ data class CompyBackupSet(
     val manifest: SnapshotManifest? = null,
     val manifestSha256: String = "",
     val legacy: Boolean = false,
+    val restorable: Boolean = true,
+    val problem: String? = null,
 )
 
 data class BackupCreateResult(
@@ -121,6 +123,7 @@ data class BackupCreateResult(
     val projectEntries: Int,
     val retainedSets: Int,
     val destinationCopies: List<CompyBackupSet> = listOf(backupSet),
+    val cleanupWarnings: List<String> = emptyList(),
 )
 
 data class ProjectRestoreResult(
@@ -331,11 +334,17 @@ class CompyBackupStore(
                     }
                 }
 
+            val cleanupWarnings = mutableListOf<String>()
             destinations.forEach { destination ->
-                pruneSnapshots(destination, ownedLocks)
-            }
-            destinations.forEach { destination ->
-                cleanupApkArchive(destination, ownedLocks)
+                try {
+                    pruneSnapshots(destination, ownedLocks)
+                    cleanupApkArchive(destination, ownedLocks)
+                } catch (error: BackupLockLostException) {
+                    throw error
+                } catch (error: Exception) {
+                    cleanupWarnings +=
+                        "${destination.compyDirectory}: ${error.message ?: error.javaClass.simpleName}"
+                }
             }
 
             val retainedCount =
@@ -347,6 +356,7 @@ class CompyBackupStore(
                 projectEntries = sourceFiles.map(::topLevelProjectName).distinct().size,
                 retainedSets = retainedCount,
                 destinationCopies = completedCopies,
+                cleanupWarnings = cleanupWarnings,
             )
         } finally {
             ownedStages.asReversed().forEach { stage ->
@@ -379,11 +389,11 @@ class CompyBackupStore(
 
     @Synchronized
     fun recoverPendingRestores() {
-        if (!projectsDirectory.isDirectory) return
-        projectsDirectory.listFiles()
-            ?.filter { it.isFile && RESTORE_JOURNAL_PATTERN.matches(it.name) }
-            ?.sortedBy { it.name }
-            ?.forEach(::recoverRestoreJournal)
+        if (!projectsDirectory.exists()) return
+        listDirectory(projectsDirectory)
+            .filter { it.isFile && RESTORE_JOURNAL_PATTERN.matches(it.name) }
+            .sortedBy { it.name }
+            .forEach(::recoverRestoreJournal)
     }
 
     @Synchronized
@@ -633,7 +643,7 @@ class CompyBackupStore(
                         throw IOException("Could not replace confirmed backup lock: $marker")
                     }
                 } else {
-                    throw BackupStoreBusyException(observeBusyLocks())
+                    throw BackupStoreBusyException(observeBusyLocks(owned))
                 }
                 owned += OwnedBackupLock(destination, marker, sha256(contents))
             }
@@ -644,10 +654,15 @@ class CompyBackupStore(
         }
     }
 
-    private fun observeBusyLocks(): List<ObservedBackupLock> =
+    private fun observeBusyLocks(ownedLocks: List<OwnedBackupLock> = emptyList()): List<ObservedBackupLock> =
         destinations.mapNotNull { destination ->
             val marker = lockFile(destination)
             if (marker.isFile) observedLock(destination, marker) else null
+        }.filterNot { observed ->
+            ownedLocks.any { owned ->
+                endpointKey(owned.destination) == endpointKey(observed.destination) &&
+                    owned.contentsSha256 == observed.markerSha256
+            }
         }
 
     private fun observedLock(destination: BackupStorageEndpoint, marker: File): ObservedBackupLock {
@@ -707,25 +722,30 @@ class CompyBackupStore(
         var maximum = 0L
         destinations.forEach { destination ->
             val sourceDirectory = sourceSnapshotsDirectory(destination)
-            sourceDirectory.listFiles()?.forEach { candidate ->
-                val ordinal =
-                    when {
-                        FINAL_SNAPSHOT_DIRECTORY_PATTERN.matches(candidate.name) ->
-                            candidate.name.substringBefore('-').toLongOrNull()
-                        RECOVERED_SNAPSHOT_DIRECTORY_PATTERN.matches(candidate.name) ->
-                            readManifestOrdinalOrNull(File(candidate, MANIFEST_FILE_NAME))
-                        else -> null
-                    }
-                if (ordinal != null && ordinal > maximum) maximum = ordinal
+            if (sourceDirectory.exists()) {
+                listDirectory(sourceDirectory).forEach { candidate ->
+                    val ordinal =
+                        when {
+                            FINAL_SNAPSHOT_DIRECTORY_PATTERN.matches(candidate.name) ->
+                                candidate.name.substringBefore('-').toLongOrNull()
+                            RECOVERED_SNAPSHOT_DIRECTORY_PATTERN.matches(candidate.name) ->
+                                readManifestOrdinalOrNull(File(candidate, MANIFEST_FILE_NAME))
+                            else -> null
+                        }
+                    if (ordinal != null && ordinal > maximum) maximum = ordinal
+                }
             }
             if (
                 source.kind == BackupSourceKind.CARD &&
                 destination.kind == BackupSourceKind.CARD &&
                 destination.id == source.id
             ) {
-                backupsDirectory(destination).listFiles()?.forEach { legacy ->
-                    val ordinal = legacy.name.toLongOrNull()?.takeIf { it > 0L }
-                    if (ordinal != null && ordinal > maximum) maximum = ordinal
+                val backups = backupsDirectory(destination)
+                if (backups.exists()) {
+                    listDirectory(backups).forEach { legacy ->
+                        val ordinal = legacy.name.toLongOrNull()?.takeIf { it > 0L }
+                        if (ordinal != null && ordinal > maximum) maximum = ordinal
+                    }
                 }
             }
         }
@@ -887,8 +907,9 @@ class CompyBackupStore(
         ownedLocks: List<OwnedBackupLock>,
     ) {
         val sourceDirectory = sourceSnapshotsDirectory(destination)
+        if (!sourceDirectory.exists()) return
         val readableUnpinned = mutableListOf<CompyBackupSet>()
-        sourceDirectory.listFiles()?.forEach { directory ->
+        listDirectory(sourceDirectory).forEach { directory ->
             if (!FINAL_SNAPSHOT_DIRECTORY_PATTERN.matches(directory.name)) return@forEach
             try {
                 val snapshot = readContractSnapshot(directory, destination, verifyContents = false)
@@ -911,10 +932,10 @@ class CompyBackupStore(
         if (!archive.isDirectory) return
         val referenced = mutableSetOf<String>()
         val snapshotsRoot = File(backupsDirectory(destination), SNAPSHOTS_DIRECTORY_NAME)
-        if (snapshotsRoot.isDirectory) {
-            snapshotsRoot.listFiles()?.forEach { kindDirectory ->
-                kindDirectory.listFiles()?.forEach { idDirectory ->
-                    idDirectory.listFiles()?.forEach snapshotLoop@{ snapshot ->
+        if (snapshotsRoot.exists()) {
+            listDirectory(snapshotsRoot).forEach { kindDirectory ->
+                listDirectory(kindDirectory).forEach { idDirectory ->
+                    listDirectory(idDirectory).forEach snapshotLoop@{ snapshot ->
                         if (
                             !FINAL_SNAPSHOT_DIRECTORY_PATTERN.matches(snapshot.name) &&
                             !RECOVERED_SNAPSHOT_DIRECTORY_PATTERN.matches(snapshot.name)
@@ -930,10 +951,10 @@ class CompyBackupStore(
                 }
             }
         }
-        archive.listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".apk") && !it.name.startsWith(INCOMING_PREFIX) }
-            ?.filterNot { it.name in referenced }
-            ?.forEach { apk ->
+        listDirectory(archive)
+            .filter { it.isFile && it.name.endsWith(".apk") && !it.name.startsWith(INCOMING_PREFIX) }
+            .filterNot { it.name in referenced }
+            .forEach { apk ->
                 assertOwnsAll(ownedLocks)
                 if (!apk.delete()) throw IOException("Could not remove unreferenced APK: $apk")
             }
@@ -944,18 +965,66 @@ class CompyBackupStore(
         verifyContents: Boolean,
     ): List<CompyBackupSet> {
         val snapshotsRoot = File(backupsDirectory(destination), SNAPSHOTS_DIRECTORY_NAME)
-        val kindDirectories = snapshotsRoot.listFiles() ?: return emptyList()
-        return kindDirectories.flatMap { kindDirectory ->
-            if (BackupSourceKind.entries.none { it.wireName == kindDirectory.name }) {
-                return@flatMap emptyList()
+        if (!snapshotsRoot.exists()) return emptyList()
+        val kindDirectories = listDirectory(snapshotsRoot)
+        return kindDirectories.flatMap kindLoop@{ kindDirectory ->
+            val sourceKind = BackupSourceKind.entries.firstOrNull { it.wireName == kindDirectory.name }
+            if (sourceKind == null) {
+                return@kindLoop emptyList()
             }
-            kindDirectory.listFiles()?.flatMap { idDirectory ->
-                idDirectory.listFiles()?.filter {
+            val idDirectories =
+                try {
+                    listDirectory(kindDirectory)
+                } catch (error: Exception) {
+                    return@kindLoop listOf(
+                        unreadableSnapshot(kindDirectory, destination, sourceKind, "", error),
+                    )
+                }
+            idDirectories.flatMap idLoop@{ idDirectory ->
+                val snapshotDirectories =
+                    try {
+                        listDirectory(idDirectory)
+                    } catch (error: Exception) {
+                        return@idLoop listOf(
+                            unreadableSnapshot(idDirectory, destination, sourceKind, idDirectory.name, error),
+                        )
+                    }
+                snapshotDirectories.filter {
                     FINAL_SNAPSHOT_DIRECTORY_PATTERN.matches(it.name) ||
                         RECOVERED_SNAPSHOT_DIRECTORY_PATTERN.matches(it.name)
-                }?.map { readContractSnapshot(it, destination, verifyContents) } ?: emptyList()
-            } ?: emptyList()
+                }.map { snapshot ->
+                    try {
+                        readContractSnapshot(snapshot, destination, verifyContents)
+                    } catch (error: Exception) {
+                        unreadableSnapshot(snapshot, destination, sourceKind, idDirectory.name, error)
+                    }
+                }
+            }
         }
+    }
+
+    private fun unreadableSnapshot(
+        directory: File,
+        destination: BackupStorageEndpoint,
+        sourceKind: BackupSourceKind,
+        bareSourceId: String,
+        error: Exception,
+    ): CompyBackupSet {
+        val sourceId =
+            if (sourceKind == BackupSourceKind.CARD) {
+                CompyStorageContract.CARD_ID_PREFIX + bareSourceId
+            } else {
+                bareSourceId
+            }
+        return CompyBackupSet(
+            ordinal = directory.name.substringBefore('-').toLongOrNull() ?: 0L,
+            directory = directory,
+            sourceKind = sourceKind,
+            sourceId = sourceId,
+            destination = destination,
+            restorable = false,
+            problem = error.message ?: "Snapshot is unreadable",
+        )
     }
 
     private fun countRetainedSnapshots(destination: BackupStorageEndpoint): Int {
@@ -1507,6 +1576,9 @@ class CompyBackupStore(
     }
 
     private fun resolveBackupSet(requested: CompyBackupSet): CompyBackupSet {
+        if (!requested.restorable) {
+            throw IOException(requested.problem ?: "Snapshot is not restorable")
+        }
         val canonical = requested.directory.canonicalFile
         return listAllBackupCopies(verifyContents = true).firstOrNull { it.directory.canonicalFile == canonical }
             ?: throw IOException("Snapshot is outside the configured backup stores")
@@ -1683,6 +1755,11 @@ class CompyBackupStore(
         }
     }
 
+    private fun listDirectory(directory: File): List<File> {
+        if (!directory.isDirectory) throw IOException("Expected a readable directory: $directory")
+        return directory.listFiles()?.toList() ?: throw IOException("Could not read directory: $directory")
+    }
+
     private fun deleteTreeChecked(path: File) {
         if (!path.exists()) return
         if (path.isDirectory) {
@@ -1799,6 +1876,15 @@ class CompyBackupStore(
 
     companion object {
         const val DEFAULT_RETENTION_LIMIT = CompyStorageContract.SNAPSHOT_RETENTION_PER_SOURCE
+
+        fun recoverPendingRestoresOnStartup(source: BackupStorageEndpoint) {
+            CompyBackupStore(
+                source = source,
+                destinationEndpoints = listOf(source),
+                apkInspector = ApkArchiveInspector { throw IOException("APK inspection is unavailable during startup recovery") },
+            ).recoverPendingRestores()
+        }
+
         private const val BACKUPS_DIRECTORY_NAME = "backups"
         private const val PROJECTS_DIRECTORY_NAME = "projects"
         private const val APK_DIRECTORY_NAME = "apk"

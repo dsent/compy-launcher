@@ -31,11 +31,28 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        recoverPendingProjectRestores()
+
         // Minimal blank view
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
         }
         setContentView(root)
+    }
+
+    private fun recoverPendingProjectRestores() {
+        try {
+            val card = CompyStorage.removableStorage(this)
+            CompyBackupStore.recoverPendingRestoresOnStartup(
+                BackupStorageEndpoint(
+                    kind = BackupSourceKind.CARD,
+                    id = card.id,
+                    compyDirectory = card.compyDirectory,
+                ),
+            )
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not reconcile pending project restores", error)
+        }
     }
 
     override fun onResume() {

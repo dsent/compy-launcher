@@ -5,7 +5,11 @@
 
 package toys.compy.launcher
 
+import android.Manifest
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
@@ -13,14 +17,26 @@ import android.os.storage.StorageVolume
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.UUID
 
 data class MountedCompyStorage(
     val id: String,
     val compyDirectory: File,
+)
+
+class MissingInternalIdentityException(val identityFile: File) :
+    IOException("Internal Compy identity is missing: $identityFile")
+
+data class InternalStorageAdoption(
+    val compyDirectory: File,
+    val identityFile: File,
+    val deviceId: String,
+    val hardwareSerial: String,
 )
 
 object CompyStorage {
@@ -53,9 +69,71 @@ object CompyStorage {
         return MountedCompyStorage(deviceId, compyDirectory)
     }
 
+    fun planInternalStorageAdoption(context: Context): InternalStorageAdoption {
+        val compyDirectory = File(internalStorageRoot(context), CompyStorageContract.ROOT)
+        return InternalStorageAdoption(
+            compyDirectory = compyDirectory,
+            identityFile = File(compyDirectory, CompyStorageContract.INTERNAL_IDENTITY_FILE),
+            deviceId = UUID.randomUUID().toString().lowercase(Locale.US),
+            hardwareSerial = hardwareSerial(context),
+        )
+    }
+
+    fun adoptInternalStorage(plan: InternalStorageAdoption): MountedCompyStorage =
+        adoptInternalStorage(plan.compyDirectory, plan.deviceId, plan.hardwareSerial)
+
+    internal fun adoptInternalStorage(
+        compyDirectory: File,
+        deviceId: String,
+        hardwareSerial: String,
+    ): MountedCompyStorage {
+        if (!DEVICE_ID_PATTERN.matches(deviceId)) throw IOException("Invalid proposed internal device ID")
+        if (hardwareSerial.isBlank()) throw IOException("Hardware serial is unavailable")
+        if (!compyDirectory.isDirectory && !compyDirectory.mkdirs()) {
+            throw IOException("Could not create internal Compy directory: $compyDirectory")
+        }
+        val identityFile = File(compyDirectory, CompyStorageContract.INTERNAL_IDENTITY_FILE)
+        if (identityFile.exists()) {
+            throw IOException("Internal Compy identity already exists: $identityFile")
+        }
+        val staging = File(compyDirectory, ".incoming.$deviceId.${identityFile.name}")
+        if (staging.exists()) throw IOException("Internal identity staging path already exists: $staging")
+        val contents =
+            (JSONObject()
+                .put("format", CompyStorageContract.INTERNAL_IDENTITY_FORMAT)
+                .put("format_ver", CompyStorageContract.INTERNAL_IDENTITY_FORMAT_VERSION)
+                .put("storage_schema_ver", CompyStorageContract.STORAGE_SCHEMA_VERSION)
+                .put("device_id", deviceId)
+                .put("serial", hardwareSerial)
+                .toString(2) + "\n").toByteArray(StandardCharsets.UTF_8)
+        try {
+            FileOutputStream(staging).use { output ->
+                output.write(contents)
+                output.fd.sync()
+            }
+            if (readInternalDeviceId(staging) != deviceId) {
+                throw IOException("Staged internal identity did not validate")
+            }
+            if (identityFile.exists()) {
+                throw IOException("Internal Compy identity appeared while adoption was in progress: $identityFile")
+            }
+            if (!staging.renameTo(identityFile)) {
+                throw IOException("Could not promote internal identity into place: $identityFile")
+            }
+            if (readInternalDeviceId(identityFile) != deviceId) {
+                throw IOException("Promoted internal identity did not validate")
+            }
+            return MountedCompyStorage(deviceId, compyDirectory)
+        } finally {
+            if (staging.exists() && !staging.delete()) {
+                throw IOException("Could not remove internal identity staging file: $staging")
+            }
+        }
+    }
+
     internal fun readInternalDeviceId(identityFile: File): String {
         if (!identityFile.isFile || !identityFile.canRead()) {
-            throw IOException("Internal Compy identity is missing: $identityFile")
+            throw MissingInternalIdentityException(identityFile)
         }
         val identity =
             try {
@@ -148,6 +226,41 @@ object CompyStorage {
             storageManager.primaryStorageVolume.directory?.let { return it }
         }
         return Environment.getExternalStorageDirectory()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun hardwareSerial(context: Context): String {
+        grantHardwareSerialPermission(context)
+        val serial =
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Build.getSerial() else Build.SERIAL
+            } catch (_: SecurityException) {
+                Build.SERIAL
+            }.trim()
+        if (serial.isEmpty() || serial.equals(Build.UNKNOWN, ignoreCase = true)) {
+            throw IOException("The device did not expose a hardware serial")
+        }
+        return serial
+    }
+
+    private fun grantHardwareSerialPermission(context: Context) {
+        if (context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        val devicePolicyManager = context.getSystemService(DevicePolicyManager::class.java)
+        if (!devicePolicyManager.isDeviceOwnerApp(context.packageName)) {
+            throw IOException("Hardware serial access requires the launcher to be Device Owner")
+        }
+        val granted =
+            devicePolicyManager.setPermissionGrantState(
+                ComponentName(context, KioskDeviceAdminReceiver::class.java),
+                context.packageName,
+                Manifest.permission.READ_PHONE_STATE,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED,
+            )
+        if (!granted || context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            throw IOException("Android did not grant hardware serial access")
+        }
     }
 
     private fun externalFilesStorageRoot(externalFilesDirectory: File): File? {

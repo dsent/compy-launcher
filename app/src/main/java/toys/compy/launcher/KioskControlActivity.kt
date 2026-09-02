@@ -471,6 +471,12 @@ class KioskControlActivity : Activity() {
                 backupStore().createBackup(installedApkSnapshots(), confirmedBusyLocks)
             },
             onSuccess = { result ->
+                val cleanupWarning =
+                    if (result.cleanupWarnings.isEmpty()) {
+                        ""
+                    } else {
+                        "\n\n" + getString(R.string.create_backup_cleanup_warning, result.cleanupWarnings.size)
+                    }
                 showOperation(
                     getString(R.string.create_backup_success),
                     getString(
@@ -478,17 +484,47 @@ class KioskControlActivity : Activity() {
                         result.backupSet.ordinal,
                         result.projectEntries,
                         result.retainedSets,
-                    ),
+                    ) + cleanupWarning,
                 )
             },
             onFailure = { error ->
-                if (error is BackupStoreBusyException) {
-                    confirmBreakBackupLocks(error.busyLocks)
-                } else {
-                    showOperationFailure(error.message ?: getString(R.string.maintenance_unknown_error))
+                when (error) {
+                    is BackupStoreBusyException -> confirmBreakBackupLocks(error.busyLocks)
+                    is MissingInternalIdentityException -> confirmInternalIdentityAdoption(confirmedBusyLocks)
+                    else -> showOperationFailure(error.message ?: getString(R.string.maintenance_unknown_error))
                 }
             },
         )
+    }
+
+    private fun confirmInternalIdentityAdoption(confirmedBusyLocks: List<ObservedBackupLock>) {
+        val proposal =
+            try {
+                CompyStorage.planInternalStorageAdoption(this)
+            } catch (error: Exception) {
+                showOperationFailure(error.message ?: getString(R.string.maintenance_unknown_error))
+                return
+            }
+        confirmAction(
+            title = getString(R.string.create_backup_adopt_internal_title),
+            message =
+                getString(
+                    R.string.create_backup_adopt_internal_message,
+                    proposal.deviceId,
+                    proposal.hardwareSerial,
+                ),
+            confirm = getString(R.string.create_backup_adopt_internal_confirm),
+        ) {
+            showOperation(
+                getString(R.string.create_backup_adopt_internal_working),
+                getString(R.string.create_backup_adopt_internal_wait),
+                busy = true,
+            )
+            runMaintenanceOperation(
+                operation = { CompyStorage.adoptInternalStorage(proposal) },
+                onSuccess = { runCreateBackup(confirmedBusyLocks) },
+            )
+        }
     }
 
     private fun confirmBreakBackupLocks(locks: List<ObservedBackupLock>) {
@@ -539,7 +575,18 @@ class KioskControlActivity : Activity() {
                 AlertDialog.Builder(this)
                     .setTitle(R.string.restore_backup_choose)
                     .setItems(labels.toTypedArray()) { _, which ->
-                        confirmRestoreBackup(store, backupSets[which])
+                        val backupSet = backupSets[which]
+                        if (backupSet.restorable) {
+                            confirmRestoreBackup(store, backupSet)
+                        } else {
+                            showOperation(
+                                getString(R.string.restore_backup_unavailable),
+                                getString(
+                                    R.string.restore_backup_unavailable_message,
+                                    backupSet.problem ?: getString(R.string.maintenance_unknown_error),
+                                ),
+                            )
+                        }
                     }
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
@@ -583,6 +630,13 @@ class KioskControlActivity : Activity() {
             }
         val timestamp = snapshot.createdAt ?: "legacy"
         val details = snapshot.label?.let { "$it · $timestamp" } ?: timestamp
+        if (!snapshot.restorable) {
+            return getString(
+                R.string.restore_backup_unavailable_set_label,
+                snapshot.directory.name,
+                source,
+            )
+        }
         return getString(R.string.restore_backup_set_label, snapshot.ordinal, source, details)
     }
 

@@ -2,6 +2,8 @@ package toys.compy.launcher
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
@@ -54,6 +56,35 @@ class CompyStorageTest {
         expectIOException { CompyStorage.readInternalDeviceId(identity) }
         identity.writeText(JSONObject(original.toString()).put("device_id", DEVICE_ID.uppercase()).toString())
         expectIOException { CompyStorage.readInternalDeviceId(identity) }
+    }
+
+    @Test
+    fun missingInternalIdentityCanBeAdoptedWithoutOverwritingExistingIdentity() = withRoot { root ->
+        val compyDirectory = File(root, "Documents/compy")
+        val identity = File(compyDirectory, CompyStorageContract.INTERNAL_IDENTITY_FILE)
+        try {
+            CompyStorage.readInternalDeviceId(identity)
+            fail("Expected missing internal identity")
+        } catch (error: MissingInternalIdentityException) {
+            assertEquals(identity, error.identityFile)
+        }
+
+        val adopted = CompyStorage.adoptInternalStorage(compyDirectory, DEVICE_ID, "fixture-serial")
+
+        assertEquals(DEVICE_ID, adopted.id)
+        assertEquals(compyDirectory, adopted.compyDirectory)
+        assertEquals(DEVICE_ID, CompyStorage.readInternalDeviceId(identity))
+        assertFalse(compyDirectory.listFiles().orEmpty().any { it.name.startsWith(".incoming.") })
+
+        expectIOException {
+            CompyStorage.adoptInternalStorage(
+                compyDirectory,
+                "00000000-0000-0000-0000-000000000001",
+                "replacement-serial",
+            )
+        }
+        assertEquals(DEVICE_ID, CompyStorage.readInternalDeviceId(identity))
+        assertTrue(identity.isFile)
     }
 
     private fun writeCardIdentity(
