@@ -64,6 +64,26 @@ object LockTaskController {
         return lockTaskModeState(context) == ActivityManager.LOCK_TASK_MODE_LOCKED
     }
 
+    fun refreshKeyguardPolicy(context: Context): RecoveryResult {
+        val appContext = context.applicationContext
+        if (RecoveryState.isRequested(appContext)) {
+            return RecoveryResult(true, "Keyguard policy refresh skipped during recovery")
+        }
+        if (!isDeviceOwner(appContext)) {
+            return RecoveryResult(true, "Keyguard policy refresh skipped without Device Owner")
+        }
+        return try {
+            requireKeyguardDisabled(appContext)
+            RecoveryResult(true, "Android keyguard disabled")
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "Could not refresh Android keyguard policy", error)
+            RecoveryResult(
+                false,
+                error.message ?: "Could not refresh Android keyguard policy",
+            )
+        }
+    }
+
     /** Stops the target package without clearing its APK or app data. */
     fun stopTargetForRestart(
         context: Context,
@@ -366,6 +386,7 @@ object LockTaskController {
     }
 
     private fun armPolicies(context: Context) {
+        requireKeyguardDisabled(context)
         val dpm = devicePolicyManager(context)
         val admin = adminComponent(context)
         dpm.setLockTaskPackages(admin, KioskConfig.LOCK_TASK_PACKAGES)
@@ -382,6 +403,14 @@ object LockTaskController {
             homeFilter,
             ComponentName(context, MainActivity::class.java),
         )
+    }
+
+    private fun requireKeyguardDisabled(context: Context) {
+        val dpm = devicePolicyManager(context)
+        val admin = adminComponent(context)
+        check(dpm.setKeyguardDisabled(admin, true)) {
+            "Could not disable Android keyguard"
+        }
     }
 
     private fun setApplicationHiddenState(
