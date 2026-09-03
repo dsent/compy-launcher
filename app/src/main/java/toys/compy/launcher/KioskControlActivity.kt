@@ -36,6 +36,7 @@ import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.Executors
 
 class KioskControlActivity : Activity() {
@@ -84,6 +85,19 @@ class KioskControlActivity : Activity() {
         }
 
         buildControls()
+        if (!showPendingCardInitializationVerification()) {
+            showPendingCardInitializationRequest()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (LockTaskController.lockTaskModeState(this) == ActivityManager.LOCK_TASK_MODE_NONE) {
+            if (!showPendingCardInitializationVerification()) {
+                showPendingCardInitializationRequest()
+            }
+        }
     }
 
     override fun onResume() {
@@ -277,6 +291,9 @@ class KioskControlActivity : Activity() {
                     R.string.maintenance_group_compy,
                     listOf(
                         MaintenanceAction(R.string.btn_exit_maintenance, ::exitMaintenance),
+                        MaintenanceAction(R.string.btn_initialize_sd_card) {
+                            confirmInitializeCard(resumeAfterSuccess = false)
+                        },
                     ),
                 ),
                 MaintenanceGroup(
@@ -447,6 +464,230 @@ class KioskControlActivity : Activity() {
             startActivity(fallback)
         } catch (_: Exception) {
             showOperationFailure(getString(R.string.maintenance_no_file_manager))
+        }
+    }
+
+    private data class CardInitializationPlan(
+        val cardRoot: File,
+        val internalCompyDirectory: File,
+        val cardId: String,
+        val label: String?,
+        val identityFilePresent: Boolean,
+    )
+
+    private fun confirmInitializeCard(resumeAfterSuccess: Boolean) {
+        val plan =
+            try {
+                cardInitializationPlan()
+            } catch (error: Exception) {
+                showOperationFailure(error.message ?: getString(R.string.maintenance_unknown_error))
+                return
+            }
+        val label = plan.label ?: getString(R.string.sd_initialize_unassigned)
+        val identityState =
+            getString(
+                if (plan.identityFilePresent) {
+                    R.string.sd_initialize_identity_present
+                } else {
+                    R.string.sd_initialize_identity_absent
+                },
+            )
+        val uuid = plan.cardId.removePrefix(CompyStorageContract.CARD_ID_PREFIX)
+        val signals = getString(R.string.sd_initialize_signals, label, uuid, identityState)
+        confirmAction(
+            title = getString(R.string.sd_initialize_title),
+            message = getString(R.string.sd_initialize_message, signals),
+            confirm = getString(R.string.sd_initialize_confirm),
+        ) {
+            runInitializeCard(plan, resumeAfterSuccess)
+        }
+    }
+
+    private fun showPendingCardInitializationRequest() {
+        val statusView = operationMessageView ?: return
+        if (!KioskState.consumeCardInitializationRequest(this)) return
+        statusView.post { confirmInitializeCard(resumeAfterSuccess = true) }
+    }
+
+    private fun showPendingCardInitializationVerification(): Boolean {
+        val pending = KioskState.pendingCardInitialization(this) ?: return false
+        val statusView = operationMessageView ?: return true
+        statusView.post { runCardInitializationVerification(pending) }
+        return true
+    }
+
+    private fun cardInitializationPlan(): CardInitializationPlan {
+        val card = CompyStorage.removableStorage(this)
+        val cardRoot = card.rootDirectory
+        val identityFiles = cardRoot.listFiles()
+            ?.filter { file ->
+                file.isFile && file.name.endsWith(CompyStorageContract.CARD_IDENTITY_FILE_SUFFIX)
+            }
+            ?: throw IOException("The mounted removable storage root is unreadable")
+        val label =
+            identityFiles.singleOrNull()?.name?.removeSuffix(CompyStorageContract.CARD_IDENTITY_FILE_SUFFIX)
+        return CardInitializationPlan(
+            cardRoot = cardRoot,
+            internalCompyDirectory = CompyStorage.internalStorage(this).compyDirectory,
+            cardId = card.id,
+            label = label,
+            identityFilePresent = identityFiles.isNotEmpty(),
+        )
+    }
+
+    private fun runInitializeCard(
+        plan: CardInitializationPlan,
+        resumeAfterSuccess: Boolean,
+    ) {
+        showOperation(
+            getString(R.string.sd_initialize_working),
+            getString(R.string.sd_initialize_wait),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = {
+                val result =
+                    CompyCardInitializer.initialize(
+                        internalCompyDirectory = plan.internalCompyDirectory,
+                        cardRoot = plan.cardRoot,
+                        operationId = UUID.randomUUID().toString().lowercase(Locale.US),
+                    )
+                KioskState.clearCardInitializationFailure(this, plan.cardId)
+                val check = CompyCardCheck.inspect(this)
+                if (!check.healthy) {
+                    throw IOException(
+                        check.detail
+                            ?: "SD card remained ${check.condition.name.lowercase(Locale.US)} after initialization",
+                    )
+                }
+                syncStorageWrites()
+                KioskState.recordPendingCardInitialization(
+                    context = this,
+                    cardId = plan.cardId,
+                    result = result,
+                    resumeAfterSuccess = resumeAfterSuccess,
+                )
+                syncStorageWrites()
+                LockTaskController.rebootDevice(this)
+                result
+            },
+            onSuccess = {
+                showOperation(
+                    getString(R.string.sd_initialize_restarting),
+                    getString(R.string.sd_initialize_restarting_message),
+                    busy = true,
+                )
+            },
+            onFailure = { error ->
+                if (KioskState.pendingCardInitialization(this) == null) {
+                    showOperationFailure(
+                        error.message ?: getString(R.string.maintenance_unknown_error),
+                    )
+                } else {
+                    showOperation(
+                        getString(R.string.sd_initialize_restart_required),
+                        getString(R.string.sd_initialize_restart_required_message),
+                    )
+                }
+            },
+        )
+    }
+
+    private fun runCardInitializationVerification(pending: PendingCardInitialization) {
+        val expectedUuid = pending.cardId.removePrefix(CompyStorageContract.CARD_ID_PREFIX)
+        showOperation(
+            getString(R.string.sd_initialize_verifying),
+            getString(R.string.sd_initialize_verifying_message, expectedUuid),
+            busy = true,
+        )
+        var matchingCardSeen = false
+        runMaintenanceOperation(
+            operation = {
+                val card = awaitRemountedCard()
+                if (card.id != pending.cardId) {
+                    throw IOException(
+                        getString(R.string.sd_initialize_wrong_card, expectedUuid),
+                    )
+                }
+                matchingCardSeen = true
+                val internalCompyDirectory =
+                    CompyStorage.internalStorage(this).compyDirectory
+                CompyCardInitializer.verify(internalCompyDirectory, card.rootDirectory)
+                pending
+            },
+            onSuccess = { result ->
+                KioskState.clearPendingCardInitialization(this)
+                KioskState.clearCardInitializationFailure(this, result.cardId)
+                if (result.resumeAfterSuccess) {
+                    exitMaintenance()
+                } else {
+                    showOperation(
+                        getString(R.string.sd_initialize_success),
+                        getString(
+                            R.string.sd_initialize_success_message,
+                            result.seededProjects,
+                            result.copiedFiles,
+                            result.reusedFiles,
+                        ),
+                    )
+                }
+            },
+            onFailure = { error ->
+                val detail =
+                    if (matchingCardSeen) {
+                        getString(
+                            R.string.sd_initialize_persistence_failed,
+                            error.message ?: getString(R.string.maintenance_unknown_error),
+                        )
+                    } else {
+                        error.message ?: getString(R.string.sd_initialize_wrong_card, expectedUuid)
+                    }
+                if (matchingCardSeen) {
+                    KioskState.clearPendingCardInitialization(this)
+                    KioskState.recordCardInitializationFailure(
+                        this,
+                        pending.cardId,
+                        detail,
+                    )
+                }
+                showOperationFailure(detail)
+            },
+        )
+    }
+
+    private fun awaitRemountedCard(): MountedCompyStorage {
+        val deadline = SystemClock.elapsedRealtime() + CARD_REMOUNT_TIMEOUT_MS
+        var lastError: Exception? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
+                return CompyStorage.removableStorage(this)
+            } catch (error: Exception) {
+                lastError = error
+                try {
+                    Thread.sleep(CARD_REMOUNT_POLL_MS)
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("SD verification was interrupted", interrupted)
+                }
+            }
+        }
+        throw IOException(
+            lastError?.message ?: "The SD card did not remount in time",
+            lastError,
+        )
+    }
+
+    private fun syncStorageWrites() {
+        val process = ProcessBuilder("/system/bin/sync")
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        val status = process.waitFor()
+        if (status != 0) {
+            throw IOException(
+                "Could not sync SD-card writes" + output.takeIf(String::isNotEmpty)
+                    ?.let { ": $it" }.orEmpty(),
+            )
         }
     }
 
@@ -953,5 +1194,10 @@ class KioskControlActivity : Activity() {
         } else {
             view.text = getString(R.string.maintenance_expired)
         }
+    }
+
+    companion object {
+        private const val CARD_REMOUNT_TIMEOUT_MS = 45_000L
+        private const val CARD_REMOUNT_POLL_MS = 500L
     }
 }

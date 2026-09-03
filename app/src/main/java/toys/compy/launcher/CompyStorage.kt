@@ -6,6 +6,7 @@
 package toys.compy.launcher
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -26,6 +27,7 @@ import java.util.UUID
 
 data class MountedCompyStorage(
     val id: String,
+    val rootDirectory: File,
     val compyDirectory: File,
 )
 
@@ -58,15 +60,21 @@ object CompyStorage {
         validateRemovableIdentity(root, cardId)
         return MountedCompyStorage(
             id = cardId,
+            rootDirectory = root,
             compyDirectory = File(root, CompyStorageContract.ROOT),
         )
     }
 
     fun internalStorage(context: Context): MountedCompyStorage {
-        val compyDirectory = File(internalStorageRoot(context), CompyStorageContract.ROOT)
+        val root = internalStorageRoot(context)
+        val compyDirectory = File(root, CompyStorageContract.ROOT)
         val identityFile = File(compyDirectory, CompyStorageContract.INTERNAL_IDENTITY_FILE)
         val deviceId = readInternalDeviceId(identityFile)
-        return MountedCompyStorage(deviceId, compyDirectory)
+        return MountedCompyStorage(
+            id = deviceId,
+            rootDirectory = root,
+            compyDirectory = compyDirectory,
+        )
     }
 
     fun planInternalStorageAdoption(context: Context): InternalStorageAdoption {
@@ -123,7 +131,13 @@ object CompyStorage {
             if (readInternalDeviceId(identityFile) != deviceId) {
                 throw IOException("Promoted internal identity did not validate")
             }
-            return MountedCompyStorage(deviceId, compyDirectory)
+            return MountedCompyStorage(
+                id = deviceId,
+                rootDirectory =
+                    compyDirectory.parentFile?.parentFile
+                        ?: throw IOException("Internal Compy directory has no storage root"),
+                compyDirectory = compyDirectory,
+            )
         } finally {
             if (staging.exists() && !staging.delete()) {
                 throw IOException("Could not remove internal identity staging file: $staging")
@@ -228,6 +242,7 @@ object CompyStorage {
         return Environment.getExternalStorageDirectory()
     }
 
+    @SuppressLint("HardwareIds", "MissingPermission")
     @Suppress("DEPRECATION")
     private fun hardwareSerial(context: Context): String {
         grantHardwareSerialPermission(context)

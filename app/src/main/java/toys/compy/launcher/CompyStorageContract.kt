@@ -69,6 +69,16 @@ object CompyStorageContract {
     val RESTORE_PHASES = listOf("staged", "old-preserved", "promoted")
     val APK_RESTORE_PHASES = listOf("prepared", "current-removed", "candidate-installed", "verified")
     val INITIALIZED_DESTINATIONS = listOf("projects", "stock", "apk", "backups", "updates", "repair")
+    val INITIALIZED_DESTINATION_PATHS =
+        listOf(
+            PROJECTS_DESTINATION,
+            STOCK_DESTINATION,
+            APK_DESTINATION,
+            BACKUPS_DESTINATION,
+            UPDATES_DESTINATION,
+            REPAIR_DESTINATION,
+        ).map { destination -> destination.removePrefix("$ROOT/") }
     val CARD_MEDIA_DIRECTORIES = listOf("Download", "Movies", "Music", "Pictures")
+    val REPAIR_SUPPORTED_PLATFORMS = listOf("linux-amd64")
     val APK_INSTALL_ORDER = listOf("IDE", "Launcher")
 }

@@ -6,6 +6,18 @@
     <string name="target_activity_not_found">Target app activity not found: %1$s</string>
     <string name="failed_to_launch_target">Failed to launch target app: %1$s</string>
 
+    <string name="card_warning_title">SD card check</string>
+    <string name="card_warning_missing">No SD card is ready. Compy can use internal storage, but work saved there will not travel with the SD card.</string>
+    <string name="card_warning_unreadable">Android sees an SD card but cannot read it. Reseat or replace the card before continuing.</string>
+    <string name="card_warning_uninitialized">The SD card is readable but has not been set up for Compy. Open maintenance to prepare it, or deliberately continue. Compy IDE will use the card for projects if it is writable.</string>
+    <string name="card_warning_identity">The SD card identity needs repair. Open maintenance to inspect it, or deliberately continue. Compy IDE will use the card for projects if it is writable.</string>
+    <string name="card_warning_unwritable">The SD card can be read, but an actual create/delete test failed. It may be write-protected or worn out.</string>
+    <string name="card_warning_check_timeout">The SD card did not answer the write check in time.</string>
+    <string name="card_warning_question">Continue without a ready SD card?</string>
+    <string name="card_warning_open_maintenance">[N] Open maintenance</string>
+    <string name="card_warning_continue">[Y] Continue to Compy</string>
+    <string name="card_warning_restart_failed">Compy IDE could not restart after the storage choice.</string>
+
     <string name="maintenance_title">Maintenance Mode</string>
     <string name="maintenance_active_until">Maintenance active until: %1$s</string>
     <string name="maintenance_expired">Maintenance expired</string>
@@ -28,8 +40,28 @@
     <string name="maintenance_opening_files_message">Use Back to return to maintenance mode.</string>
     <string name="maintenance_no_file_manager">No file manager is available.</string>
     <string name="btn_exit_maintenance">Exit maintenance mode</string>
+    <string name="btn_initialize_sd_card">Initialize SD card</string>
     <string name="btn_create_backup">Create backup</string>
     <string name="btn_restore_backup">Restore backup</string>
+    <string name="sd_initialize_title">Initialize SD card</string>
+    <string name="sd_initialize_message">Card identity:\n%1$s\n\nInitialization keeps these identity signals unchanged. If you track SD cards in inventory, verify that its record matches these values. Existing files are preserved only when they exactly match the product seed; a conflict stops the operation. Compy restarts once to verify every seeded file after the card remounts.</string>
+    <string name="sd_initialize_signals">Label: %1$s\nFilesystem UUID: %2$s\nIdentity file: %3$s</string>
+    <string name="sd_initialize_unassigned">unassigned</string>
+    <string name="sd_initialize_identity_present">present</string>
+    <string name="sd_initialize_identity_absent">absent</string>
+    <string name="sd_initialize_confirm">Initialize</string>
+    <string name="sd_initialize_working">Initializing SD card</string>
+    <string name="sd_initialize_wait">Creating the Compy layout and checking product seed files before restart…</string>
+    <string name="sd_initialize_restarting">Restarting Compy</string>
+    <string name="sd_initialize_restarting_message">Initialization is written. Compy is restarting to remount the SD card and verify the persisted files.</string>
+    <string name="sd_initialize_restart_required">Restart required</string>
+    <string name="sd_initialize_restart_required_message">Initialization is written, but Compy could not restart automatically. Use the power menu to restart; verification will continue after startup.</string>
+    <string name="sd_initialize_verifying">Verifying SD card</string>
+    <string name="sd_initialize_verifying_message">Checking SD card %1$s byte-for-byte after restart…</string>
+    <string name="sd_initialize_wrong_card">Insert SD card %1$s and restart Compy to finish verification.</string>
+    <string name="sd_initialize_persistence_failed">The SD card changed across restart and is not trusted. Replace it before use. Verification detail: %1$s</string>
+    <string name="sd_initialize_success">SD card initialized</string>
+    <string name="sd_initialize_success_message">Projects seeded: %1$d\nFiles copied: %2$d\nFiles already matching: %3$d</string>
     <string name="create_backup_title">Create a new snapshot?</string>
     <string name="create_backup_message">Copy every program from this SD card and both installed Compy apps into a snapshot on this SD card and on the Compy’s internal storage. The newest three unpinned snapshots from this card are kept on each destination.</string>
     <string name="create_backup_confirm">Create snapshot</string>

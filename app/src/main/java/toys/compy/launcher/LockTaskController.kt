@@ -5,6 +5,7 @@
 
 package toys.compy.launcher
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.ActivityOptions
 import android.app.admin.DevicePolicyManager
@@ -54,6 +55,14 @@ object LockTaskController {
             Log.e(TAG, "Could not read Device Owner state", error)
             false
         }
+    }
+
+    fun rebootDevice(context: Context) {
+        val appContext = context.applicationContext
+        if (!isDeviceOwner(appContext)) {
+            throw IllegalStateException("Launcher must be Device Owner to restart Compy")
+        }
+        devicePolicyManager(appContext).reboot(adminComponent(appContext))
     }
 
     fun lockTaskModeState(context: Context): Int {
@@ -211,6 +220,72 @@ object LockTaskController {
                     }
                 } catch (error: RuntimeException) {
                     failOperation(generation, "Could not launch target into LockTask", error, onFailure)
+                }
+            }
+        }
+        return true
+    }
+
+    /** Arms the launcher activity so a pre-launch gate stays inside LockTask. */
+    fun armLauncherActivity(
+        activity: Activity,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ): Boolean {
+        val appContext = activity.applicationContext
+        if (!isDeviceOwner(appContext)) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            onFailure("Launcher-driven LockTask requires Android 9 or newer")
+            return true
+        }
+        if (isLocked(appContext)) {
+            mainHandler.post(onReady)
+            return true
+        }
+
+        val generation = beginOperation()
+        backgroundExecutor.execute {
+            try {
+                armPolicies(appContext)
+            } catch (error: RuntimeException) {
+                failOperation(
+                    generation,
+                    "Could not arm launcher safety gate",
+                    error,
+                    onFailure,
+                )
+                return@execute
+            }
+            mainHandler.post {
+                if (
+                    operationGeneration.get() != generation ||
+                    activity.isFinishing || activity.isDestroyed
+                ) {
+                    return@post
+                }
+                beginConfirmation(
+                    generation = generation,
+                    context = appContext,
+                    expectedMode = ActivityManager.LOCK_TASK_MODE_LOCKED,
+                    readyToCheck = false,
+                    onConfirmed = onReady,
+                    onTimeout = onFailure,
+                )
+                try {
+                    activity.startLockTask()
+                    pendingConfirmation
+                        ?.takeIf { it.generation == generation }
+                        ?.let { pending ->
+                            pending.readyToCheck = true
+                            checkPendingConfirmation(generation)
+                        }
+                } catch (error: RuntimeException) {
+                    failOperation(
+                        generation,
+                        "Could not enter launcher safety gate",
+                        error,
+                        onFailure,
+                    )
                 }
             }
         }
