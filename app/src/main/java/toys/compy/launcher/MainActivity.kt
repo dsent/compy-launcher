@@ -14,7 +14,9 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
@@ -204,6 +206,9 @@ class MainActivity : Activity() {
                         detail = error.message,
                     )
                 }
+            if (!result.healthy && result.detail != null) {
+                Log.w(TAG, "SD card check ${result.condition}: ${result.detail}")
+            }
             runOnUiThread {
                 if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
                     cardCheckResult = result
@@ -213,10 +218,14 @@ class MainActivity : Activity() {
         handler.postDelayed(
             {
                 if (generation == cardCheckGeneration && cardCheckResult == null) {
+                    val detail =
+                        "Card check timed out after " +
+                            "${KioskConfig.CARD_CHECK_TIMEOUT_MS} ms"
+                    Log.w(TAG, detail)
                     cardCheckResult =
                         CompyCardCheckResult(
                             condition = CompyCardCondition.UNREADABLE,
-                            detail = getString(R.string.card_warning_check_timeout),
+                            detail = detail,
                         )
                 }
             },
@@ -335,7 +344,7 @@ class MainActivity : Activity() {
                 )
                 addView(
                     TextView(this@MainActivity).apply {
-                        text = getString(R.string.card_warning_question)
+                        text = cardWarningQuestion(result)
                         textSize = 18f
                         gravity = Gravity.CENTER
                         setTextColor(Color.LTGRAY)
@@ -364,6 +373,7 @@ class MainActivity : Activity() {
     }
 
     private fun confirmationButton(labelRes: Int, action: () -> Unit): Button {
+        var primaryMouseDown = false
         return Button(this).apply {
             text = getString(labelRes)
             isAllCaps = false
@@ -371,6 +381,29 @@ class MainActivity : Activity() {
             isFocusable = true
             isFocusableInTouchMode = true
             setOnClickListener { action() }
+            setOnTouchListener { view, event ->
+                if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+                    return@setOnTouchListener false
+                }
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        primaryMouseDown =
+                            event.buttonState and MotionEvent.BUTTON_PRIMARY != 0
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val shouldClick = primaryMouseDown
+                        primaryMouseDown = false
+                        if (shouldClick) view.performClick()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        primaryMouseDown = false
+                        true
+                    }
+                    else -> true
+                }
+            }
             layoutParams =
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -420,12 +453,25 @@ class MainActivity : Activity() {
         return when (result.condition) {
             CompyCardCondition.MISSING -> getString(R.string.card_warning_missing)
             CompyCardCondition.UNREADABLE ->
-                result.detail ?: getString(R.string.card_warning_unreadable)
+                getString(R.string.card_warning_unreadable)
             CompyCardCondition.UNINITIALIZED ->
                 getString(R.string.card_warning_uninitialized)
             CompyCardCondition.IDENTITY_INVALID ->
                 getString(R.string.card_warning_identity)
             CompyCardCondition.UNWRITABLE -> getString(R.string.card_warning_unwritable)
+            CompyCardCondition.HEALTHY -> ""
+        }
+    }
+
+    private fun cardWarningQuestion(result: CompyCardCheckResult): String {
+        return when (result.condition) {
+            CompyCardCondition.MISSING,
+            CompyCardCondition.UNREADABLE,
+            CompyCardCondition.UNWRITABLE,
+            -> getString(R.string.card_warning_question_internal)
+            CompyCardCondition.UNINITIALIZED,
+            CompyCardCondition.IDENTITY_INVALID,
+            -> getString(R.string.card_warning_question_limited_card)
             CompyCardCondition.HEALTHY -> ""
         }
     }

@@ -6,14 +6,14 @@
     <string name="target_activity_not_found">Target app activity not found: %1$s</string>
     <string name="failed_to_launch_target">Failed to launch target app: %1$s</string>
 
-    <string name="card_warning_title">SD card check</string>
-    <string name="card_warning_missing">No SD card is ready. Compy can use internal storage, but work saved there will not travel with the SD card.</string>
-    <string name="card_warning_unreadable">Android sees an SD card but cannot read it. Reseat or replace the card before continuing.</string>
-    <string name="card_warning_uninitialized">The SD card is readable but has not been set up for Compy. Open maintenance to prepare it, or deliberately continue. Compy IDE will use the card for projects if it is writable.</string>
-    <string name="card_warning_identity">The SD card identity needs repair. Open maintenance to inspect it, or deliberately continue. Compy IDE will use the card for projects if it is writable.</string>
-    <string name="card_warning_unwritable">The SD card can be read, but an actual create/delete test failed. It may be write-protected or worn out.</string>
-    <string name="card_warning_check_timeout">The SD card did not answer the write check in time.</string>
-    <string name="card_warning_question">Continue without a ready SD card?</string>
+    <string name="card_warning_title">SD card needs attention</string>
+    <string name="card_warning_missing">Compy cannot find an SD card. Make sure one is fully inserted. Compy can continue using its built-in storage for projects, but projects you create or modify will stay on this device instead of moving with an SD card.</string>
+    <string name="card_warning_unreadable">Compy cannot use this SD card right now. Open maintenance, remove and reinsert the card, then try again. If the problem continues, use another card. Compy can continue using its built-in storage for projects, but projects you create or modify will stay on this device instead of moving with an SD card.</string>
+    <string name="card_warning_uninitialized">This SD card can save project files, but it is not prepared for Compy backups, updates, or recovery. Open maintenance to set it up. Without setup, your project files will be saved on the card normally, but those other features remain unavailable.</string>
+    <string name="card_warning_identity">The Compy setup information on this SD card does not agree. Open maintenance and use Files to copy anything important. Use another card for backups, updates, and recovery. If you continue, your project files will be saved on the card normally, but those other features remain unavailable.</string>
+    <string name="card_warning_unwritable">Compy can read this SD card but cannot save changes to it. Open maintenance, remove and reinsert the card, then try again. If the problem continues, use Files to copy anything important and replace the card. Compy can continue using its built-in storage for projects, but projects you create or modify will stay on this device instead of moving with an SD card.</string>
+    <string name="card_warning_question_internal">Continue using built-in storage instead of the SD card?</string>
+    <string name="card_warning_question_limited_card">Continue using this SD card for project files without backup, update, or recovery?</string>
     <string name="card_warning_open_maintenance">[N] Open maintenance</string>
     <string name="card_warning_continue">[Y] Continue to Compy</string>
     <string name="card_warning_restart_failed">Compy IDE could not restart after the storage choice.</string>
