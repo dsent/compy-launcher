@@ -387,6 +387,29 @@ class CompyBackupStore(
         return restoreProjectInternal(resolveBackupSet(backupSet), projectName)
     }
 
+    /**
+     * Restores one already-verified project tree through the same durable
+     * transaction used by snapshot restore.
+     */
+    @Synchronized
+    internal fun restoreProjectTree(
+        sourceProject: File,
+        projectName: String,
+        sourceManifestSha256: String,
+        expectedFiles: List<SnapshotFileEntry>,
+    ): ProjectRestoreResult {
+        recoverPendingRestores()
+        validateProjectName(projectName)
+        validateManifestPaths(expectedFiles.map { it.path })
+        val expected = entriesForProject(expectedFiles, projectName)
+        return restoreProjectInternal(
+            sourceProject = sourceProject,
+            projectName = projectName,
+            sourceManifestSha256 = normalizeSha256(sourceManifestSha256),
+            expected = expected,
+        )
+    }
+
     @Synchronized
     fun recoverPendingRestores() {
         if (!projectsDirectory.exists()) return
@@ -457,12 +480,26 @@ class CompyBackupStore(
         projectName: String,
     ): ProjectRestoreResult {
         validateProjectName(projectName)
-        ensureDirectory(projectsDirectory)
-
         val sourceProject = File(File(backupSet.directory, PROJECTS_DIRECTORY_NAME), projectName)
         if (!sourceProject.exists()) throw IOException("Snapshot has no project entry: $projectName")
         val manifest = backupSet.manifest ?: throw IOException("Snapshot manifest is unavailable")
         val expected = entriesForProject(manifest.files, projectName)
+        return restoreProjectInternal(
+            sourceProject = sourceProject,
+            projectName = projectName,
+            sourceManifestSha256 = backupSet.manifestSha256,
+            expected = expected,
+        )
+    }
+
+    private fun restoreProjectInternal(
+        sourceProject: File,
+        projectName: String,
+        sourceManifestSha256: String,
+        expected: List<SnapshotFileEntry>,
+    ): ProjectRestoreResult {
+        ensureDirectory(projectsDirectory)
+        if (!sourceProject.isDirectory) throw IOException("Project source is unavailable: $projectName")
 
         val target = File(projectsDirectory, projectName)
         if (verifyProjectItem(target, projectName, expected)) {
@@ -486,7 +523,7 @@ class CompyBackupStore(
         val state =
             RestoreJournal(
                 operationId = operationId,
-                sourceManifestSha256 = backupSet.manifestSha256,
+                sourceManifestSha256 = sourceManifestSha256,
                 targetName = projectName,
                 targetExisted = targetExisted,
                 backupName = backup?.name,

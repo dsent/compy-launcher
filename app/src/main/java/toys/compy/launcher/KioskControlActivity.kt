@@ -25,9 +25,11 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.core.graphics.toColorInt
 import java.io.File
@@ -48,6 +50,12 @@ class KioskControlActivity : Activity() {
     private data class MaintenanceGroup(
         val titleRes: Int,
         val actions: List<MaintenanceAction>,
+    )
+
+    private data class StockCatalogDiscovery(
+        val target: BackupStorageEndpoint,
+        val catalogs: List<CompyStockCatalog>,
+        val unavailable: List<String>,
     )
 
     private val actionButtons = mutableListOf<Button>()
@@ -301,6 +309,7 @@ class KioskControlActivity : Activity() {
                 MaintenanceGroup(
                     R.string.maintenance_group_backup,
                     listOf(
+                        MaintenanceAction(R.string.btn_restore_stock, ::chooseStockRestoreRoot),
                         MaintenanceAction(R.string.btn_create_backup, ::confirmCreateBackup),
                         MaintenanceAction(R.string.btn_restore_backup, ::chooseBackupToRestore),
                     ),
@@ -690,6 +699,297 @@ class KioskControlActivity : Activity() {
                 "Could not sync SD-card writes" + output.takeIf(String::isNotEmpty)
                     ?.let { ": $it" }.orEmpty(),
             )
+        }
+    }
+
+    private fun chooseStockRestoreRoot() {
+        showOperation(
+            getString(R.string.restore_stock_loading),
+            getString(R.string.restore_stock_loading_message),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = ::discoverStockCatalogs,
+            onSuccess = { discovery ->
+                when (discovery.catalogs.size) {
+                    0 -> showOperationFailure(getString(R.string.restore_stock_none_message))
+                    1 ->
+                        chooseStockVersions(
+                            discovery.catalogs.single(),
+                            discovery.target,
+                            discovery.unavailable,
+                        )
+                    else -> showStockRootDialog(discovery)
+                }
+            },
+        )
+    }
+
+    private fun discoverStockCatalogs(): StockCatalogDiscovery {
+        val target = activeProjectStorage()
+        val catalogs = mutableListOf<CompyStockCatalog>()
+        val unavailable = mutableListOf<String>()
+
+        fun discover(label: String, storage: () -> MountedCompyStorage, kind: BackupSourceKind) {
+            try {
+                val mounted = storage()
+                val endpoint = BackupStorageEndpoint(kind, mounted.id, mounted.compyDirectory)
+                catalogs += CompyStockStore(endpoint).readCatalog()
+            } catch (error: Exception) {
+                unavailable += "$label: ${error.message ?: getString(R.string.maintenance_unknown_error)}"
+            }
+        }
+
+        discover(getString(R.string.restore_stock_root_card), { CompyStorage.removableStorage(this) }, BackupSourceKind.CARD)
+        discover(
+            getString(R.string.restore_stock_root_internal),
+            { CompyStorage.internalStorage(this) },
+            BackupSourceKind.INTERNAL,
+        )
+        if (catalogs.isEmpty()) {
+            throw IOException(
+                getString(
+                    R.string.restore_stock_none_details,
+                    unavailable.joinToString("\n"),
+                ),
+            )
+        }
+        return StockCatalogDiscovery(target, catalogs, unavailable)
+    }
+
+    private fun activeProjectStorage(): BackupStorageEndpoint {
+        val card = CompyCardCheck.inspect(this)
+        val kind: BackupSourceKind
+        val mounted =
+            when (card.condition) {
+                CompyCardCondition.HEALTHY,
+                CompyCardCondition.UNINITIALIZED,
+                -> {
+                    kind = BackupSourceKind.CARD
+                    CompyStorage.removableStorage(this)
+                }
+                CompyCardCondition.MISSING -> {
+                    kind = BackupSourceKind.INTERNAL
+                    CompyStorage.internalStorage(this)
+                }
+                CompyCardCondition.UNREADABLE ->
+                    throw IOException(
+                        getString(
+                            R.string.restore_stock_target_unreadable,
+                            card.detail ?: getString(R.string.maintenance_unknown_error),
+                        ),
+                    )
+                CompyCardCondition.IDENTITY_INVALID ->
+                    throw IOException(
+                        getString(
+                            R.string.restore_stock_target_identity,
+                            card.detail ?: getString(R.string.maintenance_unknown_error),
+                        ),
+                    )
+                CompyCardCondition.UNWRITABLE ->
+                    throw IOException(
+                        getString(
+                            R.string.restore_stock_target_unwritable,
+                            card.detail ?: getString(R.string.maintenance_unknown_error),
+                        ),
+                    )
+            }
+        return BackupStorageEndpoint(kind, mounted.id, mounted.compyDirectory)
+    }
+
+    private fun showStockRootDialog(discovery: StockCatalogDiscovery) {
+        showOperation(
+            getString(R.string.restore_stock_choose_root),
+            getString(
+                R.string.restore_stock_choose_root_message,
+                stockStorageLabel(discovery.target),
+            ),
+        )
+        val dialog =
+            AlertDialog.Builder(this)
+                .setTitle(R.string.restore_stock_choose_root)
+                .setItems(
+                    discovery.catalogs.map { stockStorageLabel(it.source) }.toTypedArray(),
+                ) { _, which ->
+                    recordMaintenanceInteraction()
+                    chooseStockVersions(
+                        discovery.catalogs[which],
+                        discovery.target,
+                        discovery.unavailable,
+                    )
+                }
+                .setNegativeButton(R.string.maintenance_cancel, null)
+                .create()
+        makeKeyboardChoiceModal(dialog)
+        dialog.show()
+    }
+
+    private fun chooseStockVersions(
+        catalog: CompyStockCatalog,
+        target: BackupStorageEndpoint,
+        unavailable: List<String>,
+    ) {
+        val sourceLabel = stockStorageLabel(catalog.source)
+        val targetLabel = stockStorageLabel(target)
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 16, 32, 16)
+        }
+        column.addView(
+            TextView(this).apply {
+                text =
+                    buildString {
+                        append(
+                            getString(
+                                R.string.restore_stock_choose_versions_message,
+                                catalog.programs.size,
+                                sourceLabel,
+                                targetLabel,
+                            ),
+                        )
+                        if (unavailable.isNotEmpty()) {
+                            append("\n\n")
+                            append(getString(R.string.restore_stock_unavailable_locations, unavailable.joinToString("\n")))
+                        }
+                    }
+                setPadding(0, 0, 0, 16)
+            },
+        )
+
+        val selections = linkedMapOf<String, Spinner>()
+        catalog.programs.forEach { program ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(
+                TextView(this).apply {
+                    text = program.name
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.8f)
+                    setPadding(0, 8, 16, 8)
+                },
+            )
+            val labels =
+                program.versions.map { version ->
+                    if (version.token == program.defaultToken) {
+                        getString(R.string.restore_stock_default_version, version.token)
+                    } else {
+                        version.token
+                    }
+                }
+            val spinner = Spinner(this).apply {
+                adapter =
+                    ArrayAdapter(
+                        this@KioskControlActivity,
+                        android.R.layout.simple_spinner_item,
+                        labels,
+                    ).also { adapter ->
+                        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                    }
+                setSelection(program.versions.indexOfFirst { it.token == program.defaultToken })
+                isFocusableInTouchMode = true
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f)
+            }
+            selections[program.name] = spinner
+            row.addView(spinner)
+            column.addView(row)
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(column)
+        }
+        val dialog =
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.restore_stock_choose_versions, targetLabel))
+                .setView(scroll)
+                .setNegativeButton(R.string.maintenance_cancel, null)
+                .setPositiveButton(R.string.restore_stock_confirm, null)
+                .create()
+        dialog.setOnShowListener {
+            val confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+            confirm.setOnClickListener {
+                recordMaintenanceInteraction()
+                val selectedTokens =
+                    catalog.programs.associate { program ->
+                        val selected = selections.getValue(program.name).selectedItemPosition
+                        program.name to program.versions[selected].token
+                    }
+                dialog.dismiss()
+                runStockRestore(catalog, target, selectedTokens)
+            }
+            val focusOrder = selections.values.toList() + listOf(confirm, cancel)
+            focusOrder.forEach { view ->
+                view.id = View.generateViewId()
+                view.isFocusableInTouchMode = true
+            }
+            focusOrder.zipWithNext().forEach { (current, next) ->
+                current.nextFocusForwardId = next.id
+                current.nextFocusDownId = next.id
+                next.nextFocusUpId = current.id
+            }
+            selections.values.firstOrNull()?.requestFocus()
+        }
+        makeKeyboardChoiceModal(dialog)
+        dialog.show()
+    }
+
+    private fun runStockRestore(
+        catalog: CompyStockCatalog,
+        target: BackupStorageEndpoint,
+        selectedTokens: Map<String, String>,
+    ) {
+        showOperation(
+            getString(R.string.restore_stock_working),
+            getString(
+                R.string.restore_stock_wait,
+                stockStorageLabel(catalog.source),
+                stockStorageLabel(target),
+            ),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = {
+                CompyStockStore(catalog.source, target).restoreAll(catalog, selectedTokens)
+            },
+            onSuccess = { result ->
+                showOperation(
+                    getString(R.string.restore_stock_success),
+                    getString(
+                        R.string.restore_stock_success_message,
+                        result.restoredPrograms,
+                        result.unchangedPrograms,
+                        result.preservedPrograms,
+                    ),
+                )
+            },
+        )
+    }
+
+    private fun stockStorageLabel(storage: BackupStorageEndpoint): String =
+        when (storage.kind) {
+            BackupSourceKind.CARD -> getString(R.string.restore_stock_root_card)
+            BackupSourceKind.INTERNAL -> getString(R.string.restore_stock_root_internal)
+        }
+
+    private fun makeKeyboardChoiceModal(dialog: AlertDialog) {
+        dialog.setCancelable(false)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            recordMaintenanceInteraction()
+            when (keyCode) {
+                KeyEvent.KEYCODE_Y -> {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.performClick()
+                    true
+                }
+                KeyEvent.KEYCODE_N -> {
+                    dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.performClick()
+                    true
+                }
+                else -> false
+            }
         }
     }
 

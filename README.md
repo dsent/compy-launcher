@@ -16,6 +16,7 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
     - **Quick Settings Tile**: A "Maintenance" tile to toggle maintenance mode from the notification shade.
 - **Maintenance Control**: A hidden screen to launch other apps, access Android settings, manage files, or resume kiosk mode manually.
 - **SD Initialization**: Maintenance seeds a formatted portable card, restarts the device, and verifies the complete product seed after Android remounts the card.
+- **Stock Restore**: Maintenance restores every working program from a chosen on-device stock set, with a retained version choice for each program.
 
 ## TODO
 - self-update

@@ -63,17 +63,24 @@ class MainActivity : Activity() {
     }
 
     private fun recoverPendingProjectRestores() {
-        try {
-            val card = CompyStorage.removableStorage(this)
-            CompyBackupStore.recoverPendingRestoresOnStartup(
-                BackupStorageEndpoint(
-                    kind = BackupSourceKind.CARD,
-                    id = card.id,
-                    compyDirectory = card.compyDirectory,
-                ),
+        val storageRoots =
+            listOf(
+                BackupSourceKind.CARD to { CompyStorage.removableStorage(this) },
+                BackupSourceKind.INTERNAL to { CompyStorage.internalStorage(this) },
             )
-        } catch (error: Exception) {
-            Log.e(TAG, "Could not reconcile pending project restores", error)
+        storageRoots.forEach { (kind, findStorage) ->
+            try {
+                val storage = findStorage()
+                CompyBackupStore.recoverPendingRestoresOnStartup(
+                    BackupStorageEndpoint(
+                        kind = kind,
+                        id = storage.id,
+                        compyDirectory = storage.compyDirectory,
+                    ),
+                )
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not reconcile ${kind.wireName} project restores", error)
+            }
         }
     }
 
