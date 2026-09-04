@@ -8,6 +8,7 @@ package toys.compy.launcher
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.ActivityOptions
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -55,6 +56,15 @@ object LockTaskController {
             Log.e(TAG, "Could not read Device Owner state", error)
             false
         }
+    }
+
+    /** Keeps product activities resumable across display sleep without bypassing a secure lock. */
+    fun configureWakeVisibility(activity: Activity) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
+
+        val keyguardManager = activity.getSystemService(KeyguardManager::class.java)
+        val productWakeAllowed = isDeviceOwner(activity) && !keyguardManager.isDeviceSecure
+        activity.setShowWhenLocked(productWakeAllowed)
     }
 
     fun rebootDevice(context: Context) {

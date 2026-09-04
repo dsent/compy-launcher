@@ -62,6 +62,7 @@ class KioskControlActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LockTaskController.configureWakeVisibility(this)
 
         if (LockTaskController.lockTaskModeState(this) != ActivityManager.LOCK_TASK_MODE_NONE) {
             showUnlockingGate()
@@ -102,6 +103,7 @@ class KioskControlActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        LockTaskController.configureWakeVisibility(this)
         if (LockTaskController.lockTaskModeState(this) != ActivityManager.LOCK_TASK_MODE_NONE) {
             return
         }
@@ -1104,6 +1106,7 @@ class KioskControlActivity : Activity() {
                     return@releaseDeviceOwner
                 }
                 if (released) {
+                    LockTaskController.configureWakeVisibility(this)
                     buildControls()
                     showOperation(
                         getString(R.string.release_device_owner_success),

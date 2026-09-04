@@ -44,6 +44,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        LockTaskController.configureWakeVisibility(this)
+
         recoverPendingProjectRestores()
 
         // Minimal blank view
@@ -75,6 +77,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        LockTaskController.configureWakeVisibility(this)
         handleLauncherEntry(homeEntryGate.onResume(intent.isHomeIntent()))
     }
 
