@@ -15,6 +15,7 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
     - **Five Home presses**: Pressing the Home button 5 times within 5 seconds enables maintenance mode.
     - **Quick Settings Tile**: A "Maintenance" tile to toggle maintenance mode from the notification shade.
 - **Maintenance Control**: A hidden screen to launch other apps, access Android settings, manage files, or resume kiosk mode manually.
+- **Startup storage**: Launcher waits up to 30 seconds for Android to mount the SD card before checking it and recovering interrupted restores. A card that remains unavailable shows the storage warning; Maintenance remains accessible.
 - **SD Initialization**: Maintenance seeds a formatted portable card, restarts the device, and verifies the complete product seed after Android remounts the card.
 - **Stock Restore**: Maintenance restores every working program from a chosen on-device stock set, with a retained version choice for each program.
 

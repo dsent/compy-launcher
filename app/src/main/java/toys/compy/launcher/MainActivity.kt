@@ -34,7 +34,7 @@ class MainActivity : Activity() {
     private val homeEntryGate = HomeEntryGate()
     private val cardCheckExecutor = Executors.newSingleThreadExecutor()
     private lateinit var root: FrameLayout
-    private var cardCheckGeneration = 0
+    @Volatile private var cardCheckGeneration = 0
     private var cardCheckResult: CompyCardCheckResult? = null
     private var activeCardWarning: CompyCardCheckResult? = null
     private var cardWarningVisible = false
@@ -48,8 +48,6 @@ class MainActivity : Activity() {
 
         LockTaskController.configureWakeVisibility(this)
 
-        recoverPendingProjectRestores()
-
         // Minimal blank view
         root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -58,6 +56,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        cardCheckGeneration++
         cardCheckExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -100,6 +99,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        cardCheckGeneration++
         homeEntryGate.onPause()
         super.onPause()
         handler.removeCallbacks(launchRunnable)
@@ -204,6 +204,27 @@ class MainActivity : Activity() {
         val generation = ++cardCheckGeneration
         cardCheckResult = null
         cardCheckExecutor.execute {
+            // Boot can start Home before Android mounts portable storage. Do not
+            // turn that transient state into a card failure or skip restore recovery.
+            try {
+                if (!CardMountWait.await(
+                        timeoutMs = KioskConfig.CARD_MOUNT_TIMEOUT_MS,
+                        pollMs = KioskConfig.CARD_MOUNT_POLL_MS,
+                        state = { runCatching { CompyCardCheck.removableVolume(this)?.state }.getOrNull() },
+                        now = SystemClock::elapsedRealtime,
+                        pause = Thread::sleep,
+                        isCurrent = { generation == cardCheckGeneration },
+                    )) return@execute
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@execute
+            }
+            runOnUiThread {
+                if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
+                    armCardCheckTimeout(generation)
+                }
+            }
+            recoverPendingProjectRestores()
             val result =
                 try {
                     CompyCardCheck.inspect(this)
@@ -219,9 +240,15 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
                     cardCheckResult = result
+                    // A slow check may complete after its timeout warning was shown.
+                    // Re-enter the launch decision using the actual result.
+                    if (cardWarningVisible) scheduleLaunch()
                 }
             }
         }
+    }
+
+    private fun armCardCheckTimeout(generation: Int) {
         handler.postDelayed(
             {
                 if (generation == cardCheckGeneration && cardCheckResult == null) {

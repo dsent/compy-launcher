@@ -146,7 +146,7 @@ object CompyCardCheck {
         return CompyCardCheckResult(CompyCardCondition.HEALTHY, cardId = cardId)
     }
 
-    private fun removableVolume(context: Context): RemovableVolumeSnapshot? {
+    internal fun removableVolume(context: Context): RemovableVolumeSnapshot? {
         val storageManager = context.getSystemService(StorageManager::class.java)
         val volume = storageManager.storageVolumes.firstOrNull(StorageVolume::isRemovable) ?: return null
         return RemovableVolumeSnapshot(
