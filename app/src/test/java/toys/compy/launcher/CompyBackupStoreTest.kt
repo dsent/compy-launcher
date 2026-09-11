@@ -387,7 +387,7 @@ class CompyBackupStoreTest {
         val fixture = Fixture(temporaryFolder.newFolder())
         fixture.writeProject("alpha", "one")
         val installed = fixture.installedApks("1")
-        val available = 2L * 1024L * 1024L * 1024L
+        val available = CompyStorageContract.BACKUP_FREE_SPACE_THRESHOLD_MB * 1024L * 1024L
         val error =
             expectThrows<InsufficientBackupSpaceException> {
                 fixture.store(usableSpace = { available })

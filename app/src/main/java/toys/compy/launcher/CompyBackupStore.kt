@@ -1936,7 +1936,8 @@ class CompyBackupStore(
         private const val RESTORE_JOURNAL_PREFIX = ".restore."
         private const val WRITER_LAUNCHER = "launcher"
         private const val LEGACY_CAPTURE_ID = "00000000-0000-0000-0000-000000000000"
-        private const val MINIMUM_POST_WRITE_FREE_BYTES = 2L * 1024L * 1024L * 1024L
+        private const val MINIMUM_POST_WRITE_FREE_BYTES =
+            CompyStorageContract.BACKUP_FREE_SPACE_THRESHOLD_MB * 1024L * 1024L
         private val UTC = TimeZone.getTimeZone("UTC")
         private val WRITERS = setOf("launcher", "host")
         private val REQUIRED_APK_PACKAGES =

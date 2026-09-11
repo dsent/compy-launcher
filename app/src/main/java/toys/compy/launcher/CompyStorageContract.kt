@@ -50,7 +50,7 @@ object CompyStorageContract {
     const val SNAPSHOT_DIRECTORY_PATTERN = "^[1-9][0-9]*-[0-9]{8}-[0-9]{6}$"
     const val RECOVERED_SNAPSHOT_DIRECTORY_PATTERN = "^[.]recovered[.][0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     const val SNAPSHOT_RETENTION_PER_SOURCE = 3
-    const val BACKUP_FREE_SPACE_THRESHOLD_MB = 2048L
+    const val BACKUP_FREE_SPACE_THRESHOLD_MB = 250L
     const val NAME_TIMESTAMP_FORMAT = "YYYYMMDD-HHMMSS"
 
     const val APK_VERSION_TOKEN_PATTERN = "^[A-Za-z0-9._-]+$"
