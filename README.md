@@ -27,6 +27,7 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
 ## Configuration
 All kiosk behavior is controlled via `KioskConfig.kt`:
 - `TARGET_PACKAGE`: The app to keep in foreground (default: `toys.compy.ide`).
+- `LOCK_TASK_PACKAGES`: Launcher, IDE, and Android SystemUI, allowing USB permission dialogs during normal IDE use. The allowance covers the entire SystemUI package; notification and navigation features are controlled separately by `LOCK_TASK_FEATURES`.
 - `NORMAL_LAUNCH_DELAY_MS`: Delay before launching the target (default: 2.5s).
 - `MAINTENANCE_DURATION_MS`: How long maintenance mode stays active (default: 10m).
 

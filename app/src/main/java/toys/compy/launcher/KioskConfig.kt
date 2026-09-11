@@ -12,7 +12,8 @@ import android.os.Build
 object KioskConfig {
     const val LAUNCHER_PACKAGE = CompyStorageContract.LAUNCHER_PACKAGE
     const val TARGET_PACKAGE = CompyStorageContract.IDE_PACKAGE
-    val LOCK_TASK_PACKAGES = arrayOf(LAUNCHER_PACKAGE, TARGET_PACKAGE)
+    // Android hosts USB permission activities in SystemUI; allow them during normal IDE use.
+    val LOCK_TASK_PACKAGES = arrayOf(LAUNCHER_PACKAGE, TARGET_PACKAGE, "com.android.systemui")
     @TargetApi(Build.VERSION_CODES.P)
     const val LOCK_TASK_FEATURES =
         DevicePolicyManager.LOCK_TASK_FEATURE_HOME or
