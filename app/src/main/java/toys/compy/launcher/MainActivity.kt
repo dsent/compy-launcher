@@ -206,6 +206,16 @@ class MainActivity : Activity() {
         val generation = ++cardCheckGeneration
         cardCheckResult = null
         cardCheckExecutor.execute {
+            if (!KioskConfig.STARTUP_CARD_CHECK_ENABLED) {
+                recoverPendingProjectRestores()
+                runOnUiThread {
+                    if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
+                        cardCheckResult = CompyCardCheckResult(CompyCardCondition.HEALTHY)
+                    }
+                }
+                return@execute
+            }
+
             // Boot can start Home before Android mounts portable storage. Do not
             // turn that transient state into a card failure or skip restore recovery.
             try {
