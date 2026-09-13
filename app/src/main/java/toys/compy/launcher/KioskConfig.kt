@@ -26,6 +26,8 @@ object KioskConfig {
     const val CARD_MOUNT_TIMEOUT_MS = 30000L
     const val CARD_MOUNT_POLL_MS = 250L
     const val CARD_CHECK_TIMEOUT_MS = 3000L
+    const val CARD_CHECK_RETRY_WINDOW_MS = 30000L
+    const val CARD_CHECK_RETRY_INTERVAL_MS = 3000L
     const val CARD_CHECK_POLL_MS = 100L
     const val MAINTENANCE_DURATION_MS = 10 * 60 * 1000L
     const val HOME_SECRET_PRESS_COUNT = 5

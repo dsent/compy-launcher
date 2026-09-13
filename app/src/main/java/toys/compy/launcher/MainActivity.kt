@@ -35,6 +35,8 @@ class MainActivity : Activity() {
     private val cardCheckExecutor = Executors.newSingleThreadExecutor()
     private lateinit var root: FrameLayout
     @Volatile private var cardCheckGeneration = 0
+    @Volatile private var cardCheckAttemptInFlight = 0
+    private var cardCheckAttempts = 0
     private var cardCheckResult: CompyCardCheckResult? = null
     private var activeCardWarning: CompyCardCheckResult? = null
     private var cardWarningVisible = false
@@ -219,21 +221,25 @@ class MainActivity : Activity() {
                 Thread.currentThread().interrupt()
                 return@execute
             }
-            runOnUiThread {
-                if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
-                    armCardCheckTimeout(generation)
-                }
-            }
             recoverPendingProjectRestores()
-            val result =
+            val checked =
                 try {
-                    CompyCardCheck.inspect(this)
-                } catch (error: Exception) {
-                    CompyCardCheckResult(
-                        condition = CompyCardCondition.UNREADABLE,
-                        detail = error.message,
+                    CardCheckRetry.run(
+                        windowMs = KioskConfig.CARD_CHECK_RETRY_WINDOW_MS,
+                        intervalMs = KioskConfig.CARD_CHECK_RETRY_INTERVAL_MS,
+                        check = { inspectCardOnce(generation) },
+                        now = SystemClock::elapsedRealtime,
+                        pause = Thread::sleep,
+                        isCurrent = { generation == cardCheckGeneration },
+                        onRetry = { failed ->
+                            Log.i(TAG, "SD card check ${failed.condition}: ${failed.detail}; checking again")
+                        },
                     )
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@execute
                 }
+            val result = checked ?: return@execute
             if (!result.healthy && result.detail != null) {
                 Log.w(TAG, "SD card check ${result.condition}: ${result.detail}")
             }
@@ -248,10 +254,34 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun armCardCheckTimeout(generation: Int) {
+    // Runs on the card check executor. The hang timeout covers one attempt at a time, so the pause
+    // between attempts never turns into a timeout warning.
+    private fun inspectCardOnce(generation: Int): CompyCardCheckResult {
+        val attempt = ++cardCheckAttempts
+        cardCheckAttemptInFlight = attempt
+        runOnUiThread {
+            if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
+                armCardCheckTimeout(generation, attempt)
+            }
+        }
+        return try {
+            CompyCardCheck.inspect(this)
+        } catch (error: Exception) {
+            CompyCardCheckResult(
+                condition = CompyCardCondition.UNREADABLE,
+                detail = error.message,
+            )
+        } finally {
+            cardCheckAttemptInFlight = 0
+        }
+    }
+
+    private fun armCardCheckTimeout(generation: Int, attempt: Int) {
         handler.postDelayed(
             {
-                if (generation == cardCheckGeneration && cardCheckResult == null) {
+                if (generation == cardCheckGeneration && cardCheckResult == null &&
+                    cardCheckAttemptInFlight == attempt
+                ) {
                     val detail =
                         "Card check timed out after " +
                             "${KioskConfig.CARD_CHECK_TIMEOUT_MS} ms"
