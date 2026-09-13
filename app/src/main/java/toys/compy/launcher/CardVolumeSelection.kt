@@ -18,7 +18,8 @@ import java.util.Locale
  *
  * StorageVolume offers no public way to tell an SD card from USB storage. The block device behind
  * each volume's vold mount does: MMC block devices use major 179, while USB mass storage appears
- * as a SCSI disk. Those mount lines are visible in every app's own /proc/self/mounts.
+ * as a SCSI disk. Those mount lines are visible in every app's own /proc/self/mounts. An SD
+ * card in a USB card reader is a SCSI disk too, so only a card in the built-in slot counts.
  */
 internal object CardVolumeSelection {
     const val MMC_BLOCK_MAJOR = 179
