@@ -148,7 +148,7 @@ object CompyCardCheck {
 
     internal fun removableVolume(context: Context): RemovableVolumeSnapshot? {
         val storageManager = context.getSystemService(StorageManager::class.java)
-        val volume = storageManager.storageVolumes.firstOrNull(StorageVolume::isRemovable) ?: return null
+        val volume = CardVolumeSelection.cardVolume(storageManager.storageVolumes) ?: return null
         return RemovableVolumeSnapshot(
             state = volume.state,
             root = storageVolumeRoot(context, volume),

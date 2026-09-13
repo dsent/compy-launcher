@@ -220,9 +220,8 @@ object CompyStorage {
 
     private fun removableStorageVolume(context: Context): StorageVolume? {
         val storageManager = context.getSystemService(StorageManager::class.java)
-        return storageManager.storageVolumes.firstOrNull { volume ->
-            volume.isRemovable && volume.state == Environment.MEDIA_MOUNTED
-        }
+        return CardVolumeSelection.cardVolume(storageManager.storageVolumes)
+            ?.takeIf { it.state == Environment.MEDIA_MOUNTED }
     }
 
     private fun storageVolumeRoot(context: Context, volume: StorageVolume): File? {
