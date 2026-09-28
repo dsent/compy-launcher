@@ -328,6 +328,93 @@ class CompyBackupStoreTest {
     }
 
     @Test
+    fun lateRecoveryPromotionKeepsATargetRecreatedMeanwhile() {
+        // The restore stopped after preserving the old folder; before recovery ran, the IDE
+        // recreated the project under the same name.
+        for (targetExisted in listOf(true, false)) {
+            val fixture = Fixture(temporaryFolder.newFolder())
+            if (targetExisted) fixture.writeProject("alpha.old", "live")
+            fixture.writeProject("alpha", "made meanwhile")
+            val journal = writeRestoreJournal(fixture, "old-preserved", targetExisted, stage = "snapshot")
+
+            CompyBackupStore.recoverPendingRestoresOnStartup(fixture.cardDestination)
+
+            val kept = if (targetExisted) "alpha.old.1" else "alpha.old"
+            assertEquals("snapshot", File(fixture.projects, "alpha/main.lua").readText())
+            assertEquals("made meanwhile", File(fixture.projects, "$kept/main.lua").readText())
+            if (targetExisted) assertEquals("live", File(fixture.projects, "alpha.old/main.lua").readText())
+            assertFalse(File(fixture.projects, ".incoming.$RESTORE_OPERATION.alpha").exists())
+            assertFalse(journal.exists())
+        }
+    }
+
+    @Test
+    fun rollbackAfterAnInvalidStageKeepsATargetRecreatedMeanwhile() {
+        for (targetExisted in listOf(true, false)) {
+            val fixture = Fixture(temporaryFolder.newFolder())
+            if (targetExisted) fixture.writeProject("alpha.old", "live")
+            fixture.writeProject("alpha", "made meanwhile")
+            val journal = writeRestoreJournal(fixture, "old-preserved", targetExisted, stage = "damaged")
+
+            expectThrows<IOException> { CompyBackupStore.recoverPendingRestoresOnStartup(fixture.cardDestination) }
+
+            val kept = if (targetExisted) "alpha.old.1" else "alpha.old"
+            assertEquals("made meanwhile", File(fixture.projects, "$kept/main.lua").readText())
+            if (targetExisted) {
+                assertEquals("live", File(fixture.projects, "alpha/main.lua").readText())
+            } else {
+                assertFalse(File(fixture.projects, "alpha").exists())
+            }
+            assertFalse(journal.exists())
+        }
+    }
+
+    @Test
+    fun rollbackKeepsEditsMadeAfterPromotion() {
+        val fixture = Fixture(temporaryFolder.newFolder())
+        fixture.writeProject("alpha.old", "live")
+        fixture.writeProject("alpha", "edited after the restore")
+        val journal = writeRestoreJournal(fixture, "promoted", targetExisted = true, stage = null)
+
+        expectThrows<IOException> { CompyBackupStore.recoverPendingRestoresOnStartup(fixture.cardDestination) }
+
+        assertEquals("live", File(fixture.projects, "alpha/main.lua").readText())
+        assertEquals("edited after the restore", File(fixture.projects, "alpha.old.1/main.lua").readText())
+        assertFalse(journal.exists())
+    }
+
+    /** A journal restoring `alpha` to a single main.lua reading "snapshot", with [stage] as the staged copy. */
+    private fun writeRestoreJournal(fixture: Fixture, phase: String, targetExisted: Boolean, stage: String?): File {
+        val staged = File(fixture.projects, ".incoming.$RESTORE_OPERATION.alpha")
+        if (stage != null) {
+            staged.mkdirs()
+            File(staged, "main.lua").writeText(stage)
+        }
+        val contents = "snapshot".toByteArray(StandardCharsets.UTF_8)
+        val journal =
+            JSONObject()
+                .put("format", CompyStorageContract.RESTORE_JOURNAL_FORMAT)
+                .put("format_ver", CompyStorageContract.RESTORE_JOURNAL_FORMAT_VERSION)
+                .put("operation_id", RESTORE_OPERATION)
+                .put("source_manifest_sha256", "a".repeat(64))
+                .put("target", "alpha")
+                .put("target_existed", targetExisted)
+                .put("backup_path", if (targetExisted) "alpha.old" else JSONObject.NULL)
+                .put("staged_path", staged.name)
+                .put("phase", phase)
+                .put(
+                    "files",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("path", "projects/alpha/main.lua")
+                            .put("size", contents.size)
+                            .put("sha256", sha256(contents)),
+                    ),
+                )
+        return File(fixture.projects, ".restore.$RESTORE_OPERATION.json").also { it.writeText(journal.toString()) }
+    }
+
+    @Test
     fun legacySnapshotIsValidatedAndCanRestore() {
         val fixture = Fixture(temporaryFolder.newFolder())
         val legacy = File(fixture.cardCompy, "backups/12")
@@ -494,6 +581,8 @@ class CompyBackupStoreTest {
     }
 
     companion object {
+        private const val RESTORE_OPERATION = "00000000-0000-0000-0000-000000000556"
+
         private fun mutateManifest(directory: File, mutation: (JSONObject) -> JSONObject) {
             val manifest = File(directory, "manifest.json")
             manifest.writeText(mutation(JSONObject(manifest.readText())).toString(2) + "\n")

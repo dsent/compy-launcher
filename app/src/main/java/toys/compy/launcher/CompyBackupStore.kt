@@ -588,7 +588,14 @@ class CompyBackupStore(
                     }
                     throw IOException("Restore stage and target are invalid: ${state.targetName}")
                 }
-                if (target.exists()) deleteTreeChecked(target)
+                // A folder here was made after the old one was preserved, for example in the IDE
+                // while this restore waited for recovery. Keep it under the next .old name.
+                if (target.exists()) {
+                    val parked = nextOldPath(target)
+                    if (!target.renameTo(parked)) {
+                        throw IOException("Could not preserve ${target.name} as ${parked.name}")
+                    }
+                }
                 if (!staging.renameTo(target)) {
                     rollbackRestore(state, target, backup)
                     throw IOException("Could not promote restored project: ${state.targetName}")
@@ -635,7 +642,15 @@ class CompyBackupStore(
         target: File,
         backup: File?,
     ) {
-        if (target.exists()) deleteTreeChecked(target)
+        // During recovery the folder here may hold work done after the restore stopped, such as a
+        // folder made while it waited or a restored project edited since. Keep it under the next
+        // .old name.
+        if (target.exists()) {
+            val parked = nextOldPath(target)
+            if (!target.renameTo(parked)) {
+                throw IOException("Could not preserve ${target.name} as ${parked.name}")
+            }
+        }
         if (state.targetExisted) {
             if (backup == null || !backup.exists() || !backup.renameTo(target)) {
                 throw IOException("Could not roll back project restore: ${state.targetName}")

@@ -12,12 +12,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * on built-in storage that a power cut or crash interrupted, wait for the SD card to mount, check it
  * until Android lets apps write to it, then finish the card's interrupted restores.
  *
- * Recovery renames and deletes project folders. At boot Android refuses writes to a freshly mounted
- * card for a few seconds, so card recovery waits for the check. Built-in storage needs no such wait,
- * and goes first so that a card step that times out cannot leave it unrecovered. Recovery of a
- * restore interrupted late in its sequence deletes a project folder that no longer matches the
- * snapshot, which would lose changes a child made in the IDE, so [RecoveryGate] keeps recovery and
- * the IDE apart.
+ * Recovery renames project folders, and moves any folder in its way aside under an .old name. At
+ * boot Android refuses writes to a freshly mounted card for a few seconds, so card recovery waits
+ * for the check. Built-in storage needs no such wait, and goes first so that a card step that times
+ * out cannot leave it unrecovered. A child working in the IDE while recovery runs would find a
+ * project replaced under them, so [RecoveryGate] keeps recovery and the IDE apart.
  *
  * Card I/O can block without end on a failing card. Each mount-state query, each check attempt, and
  * the wait for an earlier run on the single card executor run under a hang timeout, after which the
