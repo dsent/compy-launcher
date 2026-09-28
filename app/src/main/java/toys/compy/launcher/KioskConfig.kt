@@ -27,11 +27,11 @@ object KioskConfig {
     // Off hides only the storage warning: restore recovery still runs first. The warning needs the
     // card check, which runs only with STARTUP_CARD_WAIT_ENABLED.
     const val STARTUP_CARD_CHECK_ENABLED = false
-    // Whether startup waits before the IDE for the card to mount and accept writes, checking it until
-    // it does. The boot-time denial, whose cause is unknown, was met while startup looked at the card,
-    // so both stay off until they pass repeated cold boots on the cards known to meet that denial
-    // (compy-launcher-startup-card-check-restored). Off, startup recovers the card's restores without
-    // waiting for or checking the card, as v0.4.2 did.
+    // Whether startup waits before the IDE for the card to mount and accept writes, checking it for
+    // up to CARD_CHECK_RETRY_WINDOW_MS. The boot-time denial, whose cause is unknown, was met while
+    // startup looked at the card, so both stay off until they pass repeated cold boots on the cards
+    // known to meet that denial (compy-launcher-startup-card-check-restored). Off, startup recovers
+    // the card's restores without waiting for or checking the card, as v0.4.2 did.
     const val STARTUP_CARD_WAIT_ENABLED = false
     const val CARD_MOUNT_TIMEOUT_MS = 30000L
     const val CARD_MOUNT_POLL_MS = 250L

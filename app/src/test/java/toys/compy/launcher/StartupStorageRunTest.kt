@@ -72,7 +72,8 @@ class StartupStorageRunTest {
         assertEquals(listOf("recover internal", "recover card"), events)
         assertSame(StartupStorageRun.NOT_CHECKED, card)
         assertTrue(StartupStorageRun.cardNeedsRecovery(StartupStorageRun.NOT_CHECKED))
-        assertTrue(StartupStorageRun.reportedResult(StartupStorageRun.NOT_CHECKED, false).healthy)
+        // An unchecked card is never warned about, even once the startup check is switched on.
+        assertTrue(StartupStorageRun.reportedResult(StartupStorageRun.NOT_CHECKED, true).healthy)
         assertEquals(emptyList<String>(), timedOut)
     }
 

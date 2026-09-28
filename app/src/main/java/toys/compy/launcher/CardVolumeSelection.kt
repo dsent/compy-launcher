@@ -23,8 +23,9 @@ import java.util.Locale
  *
  * A volume counts as the card only when its mount line shows the MMC device. A volume without one
  * is either still mounting, and the boot mount wait, when switched on, keeps polling until its line
- * appears, or mounted where the lookup cannot see it. A card reader or a micro:bit drive in that state must
- * never be treated as the card, so without an identified card the launcher uses internal storage.
+ * appears, or mounted where the lookup cannot see it. A card reader or a micro:bit drive in that
+ * state must never be treated as the card, so without an identified card the launcher uses internal
+ * storage.
  */
 internal object CardVolumeSelection {
     const val MMC_BLOCK_MAJOR = 179
