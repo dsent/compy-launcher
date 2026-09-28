@@ -47,7 +47,8 @@ object CompyCardCheck {
 
     /** The card's own condition, without an initialization failure this device recorded for it. */
     fun inspectCard(context: Context): CompyCardCheckResult {
-        return inspect(removableVolume(context))
+        val volume = removableVolume(context) ?: return withoutIdentifiedCard(unidentifiedVolumes(context))
+        return inspect(volume)
     }
 
     /**
@@ -66,6 +67,39 @@ object CompyCardCheck {
         } else {
             result.copy(condition = CompyCardCondition.UNREADABLE, detail = recordedFailure)
         }
+
+    /**
+     * The result when no removable volume is identified as the card slot; none of them is used.
+     * Removable storage that is present but not mounted may be a card that is still mounting or
+     * cannot be mounted, so it reads as unreadable and is checked again. Otherwise there is no card.
+     */
+    internal fun withoutIdentifiedCard(unidentified: List<RemovableVolumeSnapshot>): CompyCardCheckResult {
+        fun describe(volumes: List<RemovableVolumeSnapshot>) =
+            volumes.joinToString { "${it.uuid ?: "no UUID"} (${it.state})" }
+        val present =
+            unidentified.filter {
+                it.state != Environment.MEDIA_REMOVED && it.state != Environment.MEDIA_BAD_REMOVAL
+            }
+        val unmounted =
+            present.filter {
+                it.state != Environment.MEDIA_MOUNTED && it.state != Environment.MEDIA_MOUNTED_READ_ONLY
+            }
+        return when {
+            unmounted.isNotEmpty() ->
+                CompyCardCheckResult(
+                    condition = CompyCardCondition.UNREADABLE,
+                    detail = "Removable storage is present but not mounted, so no volume is identified " +
+                        "as the SD card slot: ${describe(unmounted)}",
+                )
+            present.isNotEmpty() ->
+                CompyCardCheckResult(
+                    condition = CompyCardCondition.MISSING,
+                    detail = "Removable storage not identified as the SD card slot, left unused: " +
+                        describe(present),
+                )
+            else -> CompyCardCheckResult(CompyCardCondition.MISSING)
+        }
+    }
 
     internal fun inspect(
         volume: RemovableVolumeSnapshot?,
@@ -165,6 +199,13 @@ object CompyCardCheck {
             root = storageVolumeRoot(context, volume),
             uuid = volume.uuid,
         )
+    }
+
+    private fun unidentifiedVolumes(context: Context): List<RemovableVolumeSnapshot> {
+        val storageManager = context.getSystemService(StorageManager::class.java)
+        return CardVolumeSelection.unidentifiedVolumes(storageManager.storageVolumes).map { volume ->
+            RemovableVolumeSnapshot(state = volume.state, root = null, uuid = volume.uuid)
+        }
     }
 
     private fun storageVolumeRoot(context: Context, volume: StorageVolume): File? {

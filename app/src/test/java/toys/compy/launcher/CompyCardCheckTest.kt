@@ -24,6 +24,29 @@ class CompyCardCheckTest {
     }
 
     @Test
+    fun withoutAnIdentifiedCardOnlyUnmountedStorageReadsAsUnreadable() {
+        fun volume(state: String) = RemovableVolumeSnapshot(state = state, root = null, uuid = "6bbf-f260")
+
+        assertEquals(
+            CompyCardCheckResult(CompyCardCondition.MISSING),
+            CompyCardCheck.withoutIdentifiedCard(emptyList()),
+        )
+        assertEquals(
+            CompyCardCheckResult(CompyCardCondition.MISSING),
+            CompyCardCheck.withoutIdentifiedCard(listOf(volume(Environment.MEDIA_REMOVED))),
+        )
+        val refused = CompyCardCheck.withoutIdentifiedCard(listOf(volume(Environment.MEDIA_MOUNTED)))
+        assertEquals(CompyCardCondition.MISSING, refused.condition)
+        assertTrue(refused.detail!!.contains("6bbf-f260 (mounted)"))
+        for (state in listOf(Environment.MEDIA_CHECKING, Environment.MEDIA_UNMOUNTABLE)) {
+            val present =
+                CompyCardCheck.withoutIdentifiedCard(listOf(volume(Environment.MEDIA_MOUNTED), volume(state)))
+            assertEquals(CompyCardCondition.UNREADABLE, present.condition)
+            assertTrue(CardCheckRetry.isAccessFailure(present))
+        }
+    }
+
+    @Test
     fun theDeviceRecordOfAFailedInitializationIsAppliedApart() {
         val healthy = CompyCardCheckResult(CompyCardCondition.HEALTHY, cardId = "fs:6bbf-f260")
 

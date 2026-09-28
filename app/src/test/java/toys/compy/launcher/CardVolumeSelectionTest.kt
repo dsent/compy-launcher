@@ -35,11 +35,15 @@ class CardVolumeSelectionTest {
     }
 
     @Test
-    fun cardStillMountingIsChosenOverMountedUsbStorage() {
+    fun cardStillMountingIsChosenOnceItsMountLineAppears() {
         val usb = Volume("2702-1974")
         val mountingCard = Volume("6BBF-F260")
 
-        assertEquals(mountingCard, select(listOf(usb, mountingCard), mapOf("2702-1974" to 8)))
+        assertNull(select(listOf(usb, mountingCard), mapOf("2702-1974" to 8)))
+        assertEquals(
+            mountingCard,
+            select(listOf(usb, mountingCard), mapOf("2702-1974" to 8, "6bbf-f260" to 179)),
+        )
     }
 
     @Test
@@ -48,10 +52,25 @@ class CardVolumeSelectionTest {
     }
 
     @Test
-    fun withoutMountLinesTheFirstRemovableVolumeIsKept() {
-        val first = Volume("2702-1974")
+    fun aVolumeWithoutAMountLineIsNeverTheCard() {
+        // A micro:bit drive or a card reader whose mount line the lookup cannot see.
+        val unidentified = Volume("2702-1974")
 
-        assertEquals(first, select(listOf(first, Volume("6BBF-F260")), emptyMap()))
-        assertEquals(Volume(null), select(listOf(Volume(null)), emptyMap()))
+        assertNull(select(listOf(unidentified), emptyMap()))
+        assertNull(select(listOf(unidentified, Volume(null)), mapOf("6bbf-f260" to 179)))
+    }
+
+    @Test
+    fun volumesWithoutAMountLineAreReportedAsUnidentified() {
+        val card = Volume("6BBF-F260")
+        val usb = Volume("2702-1974")
+        val unknown = Volume("1234-ABCD")
+        val noUuid = Volume(null)
+        val majors = mapOf("6bbf-f260" to 179, "2702-1974" to 8)
+
+        assertEquals(
+            listOf(unknown, noUuid),
+            CardVolumeSelection.unidentified(listOf(card, usb, unknown, noUuid), { it.uuid }, majors),
+        )
     }
 }
