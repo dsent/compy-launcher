@@ -24,6 +24,7 @@ object KioskConfig {
     const val MIN_LAUNCH_INTERVAL_MS = 5000L
     const val MAX_BACKOFF_DELAY_MS = 15000L
     // Pilot devices must reach Compy even when Android transiently denies SD-card access at boot.
+    // Off hides only the storage warning: the card wait and restore recovery still run first.
     const val STARTUP_CARD_CHECK_ENABLED = false
     const val CARD_MOUNT_TIMEOUT_MS = 30000L
     const val CARD_MOUNT_POLL_MS = 250L

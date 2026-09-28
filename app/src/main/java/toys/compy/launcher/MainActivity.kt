@@ -35,11 +35,13 @@ class MainActivity : Activity() {
     private val cardCheckExecutor = Executors.newSingleThreadExecutor()
     private lateinit var root: FrameLayout
     @Volatile private var cardCheckGeneration = 0
-    @Volatile private var cardCheckAttemptInFlight = 0
-    private var cardCheckAttempts = 0
+    // When the launcher started waiting for a result; a new run while the wait goes on keeps it.
+    private var cardCheckStartedAt = 0L
+    private var launcherResumed = false
     private var cardCheckResult: CompyCardCheckResult? = null
     private var activeCardWarning: CompyCardCheckResult? = null
     private var cardWarningVisible = false
+    private var restoreWaitView: TextView? = null
 
     private val launchRunnable = Runnable {
         performLaunch()
@@ -63,30 +65,36 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun recoverPendingProjectRestores() {
-        val storageRoots =
-            listOf(
-                BackupSourceKind.CARD to { CompyStorage.removableStorage(this) },
-                BackupSourceKind.INTERNAL to { CompyStorage.internalStorage(this) },
+    // Runs on the card check executor, inside the recovery gate. A failed recovery is logged; the
+    // next launcher start after a reboot and every Maintenance restore try again.
+    private fun recoverPendingProjectRestores(kind: BackupSourceKind, findStorage: () -> MountedCompyStorage) {
+        handler.postDelayed(recoveryOverrunCheck, KioskConfig.CARD_CHECK_TIMEOUT_MS)
+        try {
+            val storage = findStorage()
+            CompyBackupStore.recoverPendingRestoresOnStartup(
+                BackupStorageEndpoint(
+                    kind = kind,
+                    id = storage.id,
+                    compyDirectory = storage.compyDirectory,
+                ),
             )
-        storageRoots.forEach { (kind, findStorage) ->
-            try {
-                val storage = findStorage()
-                CompyBackupStore.recoverPendingRestoresOnStartup(
-                    BackupStorageEndpoint(
-                        kind = kind,
-                        id = storage.id,
-                        compyDirectory = storage.compyDirectory,
-                    ),
-                )
-            } catch (error: Exception) {
-                Log.e(TAG, "Could not reconcile ${kind.wireName} project restores", error)
-            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not reconcile ${kind.wireName} project restores", error)
         }
     }
 
+    // Shows the waiting message when a recovery outlasts the hang timeout, whether or not the
+    // launch decision is polling: the card warning stops that polling.
+    private val recoveryOverrunCheck = Runnable {
+        if (recoveryOverran() && !isFinishing && !isDestroyed) showRestoreWait()
+    }
+
+    private fun recoveryOverran(): Boolean =
+        (recoveryGate.runningForMs() ?: 0L) >= KioskConfig.CARD_CHECK_TIMEOUT_MS
+
     override fun onResume() {
         super.onResume()
+        launcherResumed = true
         LockTaskController.configureWakeVisibility(this)
         handleLauncherEntry(homeEntryGate.onResume(intent.isHomeIntent()))
     }
@@ -101,6 +109,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        launcherResumed = false
         cardCheckGeneration++
         homeEntryGate.onPause()
         super.onPause()
@@ -202,57 +211,51 @@ class MainActivity : Activity() {
         handler.postDelayed(launchRunnable, delay)
     }
 
+    // The IDE starts only once cardCheckResult is set and no restore recovery runs.
+    // StartupStorageRun explains the order of the work and which steps run under the hang timeout.
     private fun beginCardCheck() {
         val generation = ++cardCheckGeneration
+        if (!StartupStorageRun.hasWork(KioskConfig.STARTUP_CARD_CHECK_ENABLED, recoveryGate.launched())) {
+            // v0.4.2 bypass after the first launch: nothing to recover and no warning to show.
+            cardCheckResult = CompyCardCheckResult(CompyCardCondition.HEALTHY)
+            return
+        }
+        if (cardCheckResult != null || cardCheckStartedAt == 0L) {
+            cardCheckStartedAt = SystemClock.elapsedRealtime()
+        }
         cardCheckResult = null
+        val run =
+            StartupStorageRun(
+                timeoutMs = KioskConfig.CARD_CHECK_TIMEOUT_MS,
+                schedule = { delayMs, action -> handler.postDelayed(action, delayMs) },
+                isCurrent = { generation == cardCheckGeneration },
+                onTimeout = { step -> onCardStepTimeout(generation, step) },
+            )
+        // The executor runs one check at a time, so an earlier check stuck on card I/O would hold
+        // this one back without a timeout of its own.
+        val queued = run.beginStep(StartupStorageRun.QUEUED_STEP)
         cardCheckExecutor.execute {
-            if (!KioskConfig.STARTUP_CARD_CHECK_ENABLED) {
-                recoverPendingProjectRestores()
-                runOnUiThread {
-                    if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
-                        cardCheckResult = CompyCardCheckResult(CompyCardCondition.HEALTHY)
-                    }
-                }
-                return@execute
-            }
-
-            // Boot can start Home before Android mounts portable storage. Do not
-            // turn that transient state into a card failure or skip restore recovery.
-            try {
-                if (!CardMountWait.await(
-                        timeoutMs = KioskConfig.CARD_MOUNT_TIMEOUT_MS,
-                        pollMs = KioskConfig.CARD_MOUNT_POLL_MS,
-                        state = { runCatching { CompyCardCheck.removableVolume(this)?.state }.getOrNull() },
-                        now = SystemClock::elapsedRealtime,
-                        pause = Thread::sleep,
-                        isCurrent = { generation == cardCheckGeneration },
-                    )) return@execute
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return@execute
-            }
-            recoverPendingProjectRestores()
-            val checked =
+            run.endStep(queued)
+            val card =
                 try {
-                    CardCheckRetry.run(
-                        windowMs = KioskConfig.CARD_CHECK_RETRY_WINDOW_MS,
-                        intervalMs = KioskConfig.CARD_CHECK_RETRY_INTERVAL_MS,
-                        check = { inspectCardOnce(generation) },
-                        now = SystemClock::elapsedRealtime,
-                        pause = Thread::sleep,
-                        isCurrent = { generation == cardCheckGeneration },
-                        onRetry = { failed ->
-                            Log.i(TAG, "SD card check ${failed.condition}: ${failed.detail}; checking again")
-                        },
-                    )
+                    prepareStartupStorage(run)
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    return@execute
+                    null
+                } catch (error: Throwable) {
+                    // Even an Error on this thread must reach the launch decision.
+                    Log.e(TAG, "Startup storage work failed", error)
+                    CompyCardCheckResult(
+                        condition = CompyCardCondition.UNREADABLE,
+                        detail = error.message ?: error.javaClass.name,
+                    )
                 }
-            val result = checked ?: return@execute
-            if (!result.healthy && result.detail != null) {
-                Log.w(TAG, "SD card check ${result.condition}: ${result.detail}")
+            if (card == null) {
+                Log.i(TAG, "Startup storage work stopped early; restores it did not reach wait for a later start or Maintenance")
+                return@execute
             }
+            val result =
+                StartupStorageRun.reportedResult(card, KioskConfig.STARTUP_CARD_CHECK_ENABLED)
             runOnUiThread {
                 if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
                     cardCheckResult = result
@@ -264,47 +267,89 @@ class MainActivity : Activity() {
         }
     }
 
-    // Runs on the card check executor. The hang timeout covers one attempt at a time, so the pause
-    // between attempts never turns into a timeout warning.
-    private fun inspectCardOnce(generation: Int): CompyCardCheckResult {
-        val attempt = ++cardCheckAttempts
-        cardCheckAttemptInFlight = attempt
-        runOnUiThread {
-            if (generation == cardCheckGeneration && !isFinishing && !isDestroyed) {
-                armCardCheckTimeout(generation, attempt)
-            }
-        }
-        return try {
-            CompyCardCheck.inspect(this)
-        } catch (error: Exception) {
-            CompyCardCheckResult(
-                condition = CompyCardCondition.UNREADABLE,
-                detail = error.message,
-            )
-        } finally {
-            cardCheckAttemptInFlight = 0
-        }
-    }
-
-    private fun armCardCheckTimeout(generation: Int, attempt: Int) {
-        handler.postDelayed(
-            {
-                if (generation == cardCheckGeneration && cardCheckResult == null &&
-                    cardCheckAttemptInFlight == attempt
-                ) {
-                    val detail =
-                        "Card check timed out after " +
-                            "${KioskConfig.CARD_CHECK_TIMEOUT_MS} ms"
-                    Log.w(TAG, detail)
-                    cardCheckResult =
-                        CompyCardCheckResult(
-                            condition = CompyCardCondition.UNREADABLE,
-                            detail = detail,
+    // Runs on the card check executor. Boot can start Home before Android mounts portable storage,
+    // so a card that is still mounting or refusing writes is waited for, not reported at once.
+    private fun prepareStartupStorage(run: StartupStorageRun): CompyCardCheckResult? =
+        run.prepare(
+            gate = recoveryGate,
+            recoverInternal = {
+                recoverPendingProjectRestores(BackupSourceKind.INTERNAL) { CompyStorage.internalStorage(this) }
+            },
+            awaitMount = { state ->
+                CardMountWait.await(
+                    timeoutMs = startupWindows.mountWaitMs(KioskConfig.CARD_MOUNT_TIMEOUT_MS),
+                    pollMs = KioskConfig.CARD_MOUNT_POLL_MS,
+                    state = state,
+                    now = SystemClock::elapsedRealtime,
+                    pause = Thread::sleep,
+                    isCurrent = run.isCurrent,
+                )
+            },
+            mountState = { runCatching { CompyCardCheck.removableVolume(this)?.state }.getOrNull() },
+            retry = { check ->
+                val checked = CardCheckRetry.run(
+                    windowMs = startupWindows.retryWindowMs(KioskConfig.CARD_CHECK_RETRY_WINDOW_MS),
+                    intervalMs = KioskConfig.CARD_CHECK_RETRY_INTERVAL_MS,
+                    check = check,
+                    now = SystemClock::elapsedRealtime,
+                    pause = { durationMs ->
+                        StartupStorageRun.pauseWhileCurrent(
+                            durationMs = durationMs,
+                            sliceMs = KioskConfig.CARD_MOUNT_POLL_MS,
+                            isCurrent = run.isCurrent,
+                            now = SystemClock::elapsedRealtime,
+                            sleep = Thread::sleep,
                         )
+                    },
+                    isCurrent = run.isCurrent,
+                    onRetry = { failed ->
+                        Log.i(TAG, "SD card check ${failed.condition}: ${failed.detail}; checking again")
+                    },
+                )
+                    // The device's record of a failed initialization is applied after the retries,
+                    // which can never clear it.
+                    ?.let { CompyCardCheck.withInitializationRecord(this, it) }
+                // Logged here, before recovery, which can take long and which later runs skip.
+                if (checked != null && !checked.healthy && checked.detail != null) {
+                    Log.w(TAG, "SD card check ${checked.condition}: ${checked.detail}")
+                }
+                checked
+            },
+            inspect = {
+                try {
+                    CompyCardCheck.inspectCard(this)
+                } catch (error: Exception) {
+                    CompyCardCheckResult(
+                        condition = CompyCardCondition.UNREADABLE,
+                        detail = error.message,
+                    )
                 }
             },
-            KioskConfig.CARD_CHECK_TIMEOUT_MS,
+            recoverCard = { card ->
+                // A card whose check failed may still accept recovery: the failure may be a record
+                // kept on this device, or the card may have become writable after the last attempt.
+                if (StartupStorageRun.cardNeedsRecovery(card)) {
+                    recoverPendingProjectRestores(BackupSourceKind.CARD) { CompyStorage.removableStorage(this) }
+                }
+            },
         )
+
+    // Returns false to be asked again later.
+    private fun onCardStepTimeout(generation: Int, step: String): Boolean {
+        if (generation != cardCheckGeneration || cardCheckResult != null || isFinishing || isDestroyed) {
+            return true
+        }
+        // Waiting behind a recovery is not a hang: the IDE waits for recovery anyway, and a fallback
+        // now would let the launch claim end this run before its card recovery. Ask again later.
+        if (recoveryGate.runningForMs() != null) return false
+        val detail = "$step timed out after ${KioskConfig.CARD_CHECK_TIMEOUT_MS} ms"
+        Log.w(TAG, detail)
+        cardCheckResult =
+            StartupStorageRun.reportedResult(
+                CompyCardCheckResult(condition = CompyCardCondition.UNREADABLE, detail = detail),
+                KioskConfig.STARTUP_CARD_CHECK_ENABLED,
+            )
+        return true
     }
 
     private fun performLaunch() {
@@ -314,8 +359,8 @@ class MainActivity : Activity() {
         }
 
         val cardResult = cardCheckResult
-        if (cardResult == null) {
-            handler.postDelayed(launchRunnable, KioskConfig.CARD_CHECK_POLL_MS)
+        if (cardResult == null || recoveryGate.runningForMs() != null) {
+            waitForStartupStorage()
             return
         }
         if (cardResult.healthy) {
@@ -329,6 +374,13 @@ class MainActivity : Activity() {
             }
         }
 
+        // Restore recovery changes project folders the IDE lets a child change. The IDE starts only
+        // while none runs, and the claim ends the current run so none of it starts afterwards.
+        if (!recoveryGate.claimLaunch { cardCheckGeneration++ }) {
+            waitForStartupStorage()
+            return
+        }
+        hideRestoreWait()
         lastLaunchAttemptTime = SystemClock.elapsedRealtime()
         val ownerLaunchStarted =
             LockTaskController.armAndLaunchTarget(this) { message ->
@@ -361,10 +413,69 @@ class MainActivity : Activity() {
         }
     }
 
+    // Recovery has no hang timeout, because the IDE must not start while it runs, and the card wait
+    // can take up to a minute. Once either has taken longer than the hang timeout, the screen says
+    // what is happening instead of staying black.
+    private fun waitForStartupStorage() {
+        val waitedMs = SystemClock.elapsedRealtime() - cardCheckStartedAt
+        if (recoveryOverran() ||
+            (cardCheckResult == null && waitedMs >= KioskConfig.CARD_CHECK_TIMEOUT_MS)
+        ) {
+            showRestoreWait()
+        } else {
+            hideRestoreWait()
+        }
+        handler.removeCallbacks(launchRunnable)
+        handler.postDelayed(launchRunnable, KioskConfig.CARD_CHECK_POLL_MS)
+    }
+
+    // Every call on a resumed launcher arms the launch polling, so the result after recovery or after
+    // the card wait is acted on even when a card warning, which stops the polling, was being prepared
+    // or shown.
+    private fun showRestoreWait() {
+        // A paused launcher polls again from its next resume; polling now could start Maintenance
+        // twice or the IDE from the background.
+        if (launcherResumed) {
+            handler.removeCallbacks(launchRunnable)
+            handler.postDelayed(launchRunnable, KioskConfig.CARD_CHECK_POLL_MS)
+        }
+        if (restoreWaitView != null) return
+        cardWarningVisible = false
+        activeCardWarning = null
+        root.removeAllViews()
+        val message =
+            TextView(this).apply {
+                text = getString(R.string.restore_wait_message)
+                textSize = 22f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setPadding(72, 48, 72, 48)
+            }
+        root.addView(
+            message,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        restoreWaitView = message
+    }
+
+    private fun hideRestoreWait() {
+        restoreWaitView?.let(root::removeView)
+        restoreWaitView = null
+    }
+
     private fun showCardWarning(
         result: CompyCardCheckResult,
         lockPrepared: Boolean = false,
     ) {
+        // A warning drawn late, for example by a delayed LockTask callback, must not hide the
+        // message for a recovery that is taking long; the result after recovery decides again.
+        if (recoveryOverran()) {
+            showRestoreWait()
+            return
+        }
         handler.removeCallbacks(launchRunnable)
         val launcherUnlocked =
             LockTaskController.lockTaskModeState(this) ==
@@ -392,6 +503,7 @@ class MainActivity : Activity() {
         cardWarningVisible = true
         activeCardWarning = result
         root.removeAllViews()
+        restoreWaitView = null
         val panel =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -556,5 +668,16 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "CompyLauncher"
+
+        // Process-wide, like the gate: every launcher entry, such as a Home press, starts a new run.
+        private val startupWindows = StartupWindows(SystemClock::elapsedRealtime)
+
+        // Process-wide: a recreated activity must see a recovery its predecessor started.
+        private val recoveryGate =
+            RecoveryGate(
+                now = SystemClock::elapsedRealtime,
+                pause = Thread::sleep,
+                pollMs = KioskConfig.CARD_CHECK_POLL_MS,
+            )
     }
 }

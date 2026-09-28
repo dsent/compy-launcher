@@ -42,19 +42,30 @@ internal data class RemovableVolumeSnapshot(
 )
 
 object CompyCardCheck {
-    fun inspect(context: Context): CompyCardCheckResult {
-        val result = inspect(removableVolume(context))
-        val cardId = result.cardId ?: return result
-        val persistenceFailure = KioskState.cardInitializationFailure(context, cardId)
-        return if (persistenceFailure == null) {
+    fun inspect(context: Context): CompyCardCheckResult =
+        withInitializationRecord(context, inspectCard(context))
+
+    /** The card's own condition, without an initialization failure this device recorded for it. */
+    fun inspectCard(context: Context): CompyCardCheckResult {
+        return inspect(removableVolume(context))
+    }
+
+    /**
+     * Reports a card whose initialization failed verification on this device as unreadable. The
+     * record is kept on this device, so checking the card again never clears it.
+     */
+    fun withInitializationRecord(context: Context, result: CompyCardCheckResult): CompyCardCheckResult =
+        withInitializationRecord(result, result.cardId?.let { KioskState.cardInitializationFailure(context, it) })
+
+    internal fun withInitializationRecord(
+        result: CompyCardCheckResult,
+        recordedFailure: String?,
+    ): CompyCardCheckResult =
+        if (recordedFailure == null) {
             result
         } else {
-            result.copy(
-                condition = CompyCardCondition.UNREADABLE,
-                detail = persistenceFailure,
-            )
+            result.copy(condition = CompyCardCondition.UNREADABLE, detail = recordedFailure)
         }
-    }
 
     internal fun inspect(
         volume: RemovableVolumeSnapshot?,

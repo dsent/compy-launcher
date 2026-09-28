@@ -24,6 +24,17 @@ class CompyCardCheckTest {
     }
 
     @Test
+    fun theDeviceRecordOfAFailedInitializationIsAppliedApart() {
+        val healthy = CompyCardCheckResult(CompyCardCondition.HEALTHY, cardId = "fs:6bbf-f260")
+
+        assertEquals(healthy, CompyCardCheck.withInitializationRecord(healthy, recordedFailure = null))
+        val recorded = CompyCardCheck.withInitializationRecord(healthy, recordedFailure = "changed across restart")
+        assertEquals(CompyCardCondition.UNREADABLE, recorded.condition)
+        assertEquals("changed across restart", recorded.detail)
+        assertEquals("fs:6bbf-f260", recorded.cardId)
+    }
+
+    @Test
     fun mountedCardWithoutCompyLayoutIsRepairable() = withRoot { root ->
         val result = CompyCardCheck.inspect(mounted(root))
 

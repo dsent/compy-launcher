@@ -16,6 +16,7 @@
     <string name="card_warning_question_limited_card">Continue using this SD card for project files without backup, update, or recovery?</string>
     <string name="card_warning_open_maintenance">[N] Open maintenance</string>
     <string name="card_warning_continue">[Y] Continue to Compy</string>
+    <string name="restore_wait_message">Compy is getting your projects ready. Please wait, and keep Compy switched on.\n\nIf this message is still here after 10 minutes, switch Compy off, take out the SD card, and switch Compy on again. Compy then starts without the projects on that card. Later, put the card back and switch Compy off and on to use it again. If this message stays for 10 minutes even without the card, Compy itself needs repair.</string>
     <string name="card_warning_restart_failed">Compy IDE could not restart after the storage choice.</string>
 
     <string name="maintenance_title">Maintenance Mode</string>
