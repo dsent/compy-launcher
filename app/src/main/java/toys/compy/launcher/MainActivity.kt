@@ -268,7 +268,7 @@ class MainActivity : Activity() {
     }
 
     // Runs on the card check executor. Boot can start Home before Android mounts portable storage,
-    // so with STARTUP_CARD_WAIT_ENABLED a card that is still mounting or refusing writes is waited
+    // so with STARTUP_CARD_CHECK_ENABLED a card that is still mounting or refusing writes is waited
     // for, not reported at once. Without it the card is neither waited for nor checked.
     private fun prepareStartupStorage(run: StartupStorageRun): CompyCardCheckResult? =
         run.prepare(
@@ -333,7 +333,7 @@ class MainActivity : Activity() {
                     recoverPendingProjectRestores(BackupSourceKind.CARD) { CompyStorage.removableStorage(this) }
                 }
             },
-            waitForCard = KioskConfig.STARTUP_CARD_WAIT_ENABLED,
+            checkCard = KioskConfig.STARTUP_CARD_CHECK_ENABLED,
         )
 
     // Returns false to be asked again later.
@@ -415,8 +415,8 @@ class MainActivity : Activity() {
         }
     }
 
-    // Recovery has no hang timeout, because the IDE must not start while it runs, and the card wait
-    // can take up to a minute. Once either has taken longer than the hang timeout, the screen says
+    // Recovery has no hang timeout, because the IDE must not start while it runs, and the card wait,
+    // with the startup check on, can take up to a minute. Once either has taken longer than the hang timeout, the screen says
     // what is happening instead of staying black.
     private fun waitForStartupStorage() {
         val waitedMs = SystemClock.elapsedRealtime() - cardCheckStartedAt

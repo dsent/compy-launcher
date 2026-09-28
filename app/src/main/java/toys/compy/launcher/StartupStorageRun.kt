@@ -11,14 +11,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * One run of the storage work the launcher finishes before Compy IDE starts: finish project
  * restores on built-in storage that a power cut or crash interrupted, wait for the SD card to
  * mount, check it until Android lets apps write to it or a window runs out, then finish the card's
- * interrupted restores. The wait and the check run only when [prepare] is asked to wait for the
- * card (KioskConfig.STARTUP_CARD_WAIT_ENABLED); otherwise card recovery follows built-in storage at
+ * interrupted restores. The wait and the check run only when [prepare] is asked to check the card
+ * (KioskConfig.STARTUP_CARD_CHECK_ENABLED); otherwise card recovery follows built-in storage at
  * once, with no wait or check before it, as in v0.4.2, and is left for later when the card is not
  * mounted yet.
  *
  * Recovery renames project folders, and moves any folder in its way aside under an .old name. At
  * boot Android refuses writes to a freshly mounted card for a few seconds, so card recovery waits
- * for the check when the card wait is on. Built-in storage needs no such wait, and goes first so
+ * for the check when the startup check is on. Built-in storage needs no such wait, and goes first so
  * that a card step that times out cannot leave it unrecovered. A child working in the IDE while
  * recovery runs would find a project replaced under them, so [RecoveryGate] keeps recovery and the
  * IDE apart.
@@ -70,7 +70,7 @@ internal class StartupStorageRun(
     /**
      * Returns the card's condition after recovery, or null when the launcher left this run behind.
      * [awaitMount] polls the state it is given; [retry] repeats the check it is given while the card
-     * reports an access failure. Without [waitForCard] neither runs, [mountState] and [inspect] are
+     * reports an access failure. Without [checkCard] neither runs, [mountState] and [inspect] are
      * never called, and the card's condition is [NOT_CHECKED].
      */
     fun prepare(
@@ -81,11 +81,11 @@ internal class StartupStorageRun(
         retry: (check: () -> CompyCardCheckResult) -> CompyCardCheckResult?,
         inspect: () -> CompyCardCheckResult,
         recoverCard: (card: CompyCardCheckResult) -> Unit,
-        waitForCard: Boolean,
+        checkCard: Boolean,
     ): CompyCardCheckResult? {
         if (!gate.runRecovery(isCurrent, recoverInternal)) return null
         val card =
-            if (waitForCard) {
+            if (checkCard) {
                 if (!awaitMount { bounded(MOUNT_STATE_STEP, mountState) }) return null
                 retry { bounded(CHECK_STEP, inspect) } ?: return null
             } else {
@@ -100,10 +100,7 @@ internal class StartupStorageRun(
         const val MOUNT_STATE_STEP = "Card mount state query"
         const val CHECK_STEP = "Card check"
 
-        /**
-         * The card as reported when startup does not wait for it: not looked at, so never warned
-         * about, even with the startup check on.
-         */
+        /** The card when startup does not check it: not looked at, and still given its recovery. */
         val NOT_CHECKED =
             CompyCardCheckResult(CompyCardCondition.HEALTHY, detail = "not checked at startup")
 

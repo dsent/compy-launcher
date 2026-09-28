@@ -51,11 +51,11 @@ class StartupStorageRunTest {
         retry: (check: () -> CompyCardCheckResult) -> CompyCardCheckResult? = { check -> check() },
         inspect: () -> CompyCardCheckResult = { result(CompyCardCondition.HEALTHY) },
         recover: (CompyCardCheckResult) -> Unit = {},
-        waitForCard: Boolean = true,
-    ) = prepare(gate, recoverInternal, awaitMount, mountState, retry, inspect, recover, waitForCard)
+        checkCard: Boolean = true,
+    ) = prepare(gate, recoverInternal, awaitMount, mountState, retry, inspect, recover, checkCard)
 
     @Test
-    fun withoutWaitingTheCardIsNeitherWaitedForNorCheckedAndStillRecovered() {
+    fun withTheCheckOffTheCardIsNeitherWaitedForNorCheckedAndStillRecovered() {
         val events = mutableListOf<String>()
 
         val card = newRun().prepareWith(
@@ -65,24 +65,22 @@ class StartupStorageRunTest {
             retry = { throw AssertionError("retried the check") },
             inspect = { throw AssertionError("checked the card") },
             recover = { events += "recover card" },
-            waitForCard = false,
+            checkCard = false,
         )
         timers.expireAll()
 
         assertEquals(listOf("recover internal", "recover card"), events)
         assertSame(StartupStorageRun.NOT_CHECKED, card)
         assertTrue(StartupStorageRun.cardNeedsRecovery(StartupStorageRun.NOT_CHECKED))
-        // An unchecked card is never warned about, even once the startup check is switched on.
-        assertTrue(StartupStorageRun.reportedResult(StartupStorageRun.NOT_CHECKED, true).healthy)
         assertEquals(emptyList<String>(), timedOut)
     }
 
     @Test
-    fun withoutWaitingTheIdeStillCannotStartWhileCardRecoveryRuns() {
+    fun withTheCheckOffTheIdeStillCannotStartWhileCardRecoveryRuns() {
         var claimedDuringRecovery: Boolean? = null
         newRun().prepareWith(
             recover = { claimedDuringRecovery = gate.claimLaunch { current = false } },
-            waitForCard = false,
+            checkCard = false,
         )
         assertEquals(false, claimedDuringRecovery)
     }

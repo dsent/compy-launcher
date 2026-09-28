@@ -16,10 +16,10 @@ class KioskConfigTest {
         )
     }
 
-    // The startup card wait stays off until it passes cold boots on the cards known to meet the
+    // The startup card check stays off until it passes cold boots on the cards known to meet the
     // boot-time denial; switching it on is a deliberate change to this test.
     @Test
-    fun startupCardWaitIsOff() {
-        assertFalse(KioskConfig.STARTUP_CARD_WAIT_ENABLED)
+    fun startupCardCheckIsOff() {
+        assertFalse(KioskConfig.STARTUP_CARD_CHECK_ENABLED)
     }
 }
