@@ -2,6 +2,7 @@ package toys.compy.launcher
 
 import android.app.admin.DevicePolicyManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 // Warranted by the testing policy: this mask is the locked device's entire SystemUI policy.
@@ -13,5 +14,12 @@ class KioskConfigTest {
                 DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS,
             KioskConfig.LOCK_TASK_FEATURES,
         )
+    }
+
+    // The startup card wait stays off until it passes cold boots on the cards known to meet the
+    // boot-time denial; switching it on is a deliberate change to this test.
+    @Test
+    fun startupCardWaitIsOff() {
+        assertFalse(KioskConfig.STARTUP_CARD_WAIT_ENABLED)
     }
 }

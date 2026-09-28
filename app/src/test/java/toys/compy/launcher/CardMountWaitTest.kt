@@ -41,6 +41,17 @@ class CardMountWaitTest {
     }
 
     @Test
+    fun emptyWindowReadsTheStateOnceAndNeverWaits() {
+        for (state in listOf(null, Environment.MEDIA_CHECKING, Environment.MEDIA_MOUNTED)) {
+            var reads = 0
+            assertTrue(CardMountWait.await(0, 250,
+                state = { reads++; state }, now = { 0L },
+                pause = { throw AssertionError("empty window waited for $state") }, isCurrent = { true }))
+            assertEquals(1, reads)
+        }
+    }
+
+    @Test
     fun leavingLauncherCancelsWaitBeforeAnyCardCheck() {
         var current = true
         var pauses = 0
