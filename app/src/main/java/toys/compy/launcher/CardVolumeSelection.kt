@@ -22,8 +22,8 @@ import java.util.Locale
  * card in a USB card reader is a SCSI disk too, so only a card in the built-in slot counts.
  *
  * A volume counts as the card only when its mount line shows the MMC device. A volume without one
- * is either still mounting, and the boot mount wait keeps polling until its line appears, or
- * mounted where the lookup cannot see it. A card reader or a micro:bit drive in that state must
+ * is either still mounting, and the boot mount wait, when switched on, keeps polling until its line
+ * appears, or mounted where the lookup cannot see it. A card reader or a micro:bit drive in that state must
  * never be treated as the card, so without an identified card the launcher uses internal storage.
  */
 internal object CardVolumeSelection {

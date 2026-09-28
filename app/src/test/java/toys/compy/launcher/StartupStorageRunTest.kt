@@ -51,7 +51,40 @@ class StartupStorageRunTest {
         retry: (check: () -> CompyCardCheckResult) -> CompyCardCheckResult? = { check -> check() },
         inspect: () -> CompyCardCheckResult = { result(CompyCardCondition.HEALTHY) },
         recover: (CompyCardCheckResult) -> Unit = {},
-    ) = prepare(gate, recoverInternal, awaitMount, mountState, retry, inspect, recover)
+        waitForCard: Boolean = true,
+    ) = prepare(gate, recoverInternal, awaitMount, mountState, retry, inspect, recover, waitForCard)
+
+    @Test
+    fun withoutWaitingTheCardIsNeitherWaitedForNorCheckedAndStillRecovered() {
+        val events = mutableListOf<String>()
+
+        val card = newRun().prepareWith(
+            recoverInternal = { events += "recover internal" },
+            awaitMount = { throw AssertionError("waited for the card") },
+            mountState = { throw AssertionError("asked for the mount state") },
+            retry = { throw AssertionError("retried the check") },
+            inspect = { throw AssertionError("checked the card") },
+            recover = { events += "recover card" },
+            waitForCard = false,
+        )
+        timers.expireAll()
+
+        assertEquals(listOf("recover internal", "recover card"), events)
+        assertSame(StartupStorageRun.NOT_CHECKED, card)
+        assertTrue(StartupStorageRun.cardNeedsRecovery(StartupStorageRun.NOT_CHECKED))
+        assertTrue(StartupStorageRun.reportedResult(StartupStorageRun.NOT_CHECKED, false).healthy)
+        assertEquals(emptyList<String>(), timedOut)
+    }
+
+    @Test
+    fun withoutWaitingTheIdeStillCannotStartWhileCardRecoveryRuns() {
+        var claimedDuringRecovery: Boolean? = null
+        newRun().prepareWith(
+            recover = { claimedDuringRecovery = gate.claimLaunch { current = false } },
+            waitForCard = false,
+        )
+        assertEquals(false, claimedDuringRecovery)
+    }
 
     @Test
     fun builtInStorageRecoversFirstAndTheCardOnlyAfterItsCheck() {

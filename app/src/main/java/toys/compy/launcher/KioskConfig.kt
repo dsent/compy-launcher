@@ -24,12 +24,14 @@ object KioskConfig {
     const val MIN_LAUNCH_INTERVAL_MS = 5000L
     const val MAX_BACKOFF_DELAY_MS = 15000L
     // Pilot devices must reach Compy even when Android transiently denies SD-card access at boot.
-    // Off hides only the storage warning: the card check and restore recovery still run first.
+    // Off hides only the storage warning: restore recovery still runs first. The warning needs the
+    // card check, which runs only with STARTUP_CARD_WAIT_ENABLED.
     const val STARTUP_CARD_CHECK_ENABLED = false
-    // Waiting before the IDE for the card to mount and accept writes brings back the card access at
-    // startup that led to the boot-time denial. It stays off until it passes repeated cold boots on
-    // the cards known to meet that denial (compy-launcher-startup-card-check-restored). Off, the
-    // startup work looks at the card once, without waiting, before it recovers the card's restores.
+    // Whether startup waits before the IDE for the card to mount and accept writes, checking it until
+    // it does. The boot-time denial, whose cause is unknown, was met while startup looked at the card,
+    // so both stay off until they pass repeated cold boots on the cards known to meet that denial
+    // (compy-launcher-startup-card-check-restored). Off, startup recovers the card's restores without
+    // waiting for or checking the card, as v0.4.2 did.
     const val STARTUP_CARD_WAIT_ENABLED = false
     const val CARD_MOUNT_TIMEOUT_MS = 30000L
     const val CARD_MOUNT_POLL_MS = 250L

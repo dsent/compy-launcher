@@ -269,8 +269,7 @@ class MainActivity : Activity() {
 
     // Runs on the card check executor. Boot can start Home before Android mounts portable storage,
     // so with STARTUP_CARD_WAIT_ENABLED a card that is still mounting or refusing writes is waited
-    // for, not reported at once. Without it both windows are empty: the mount state is read once and
-    // the card checked once.
+    // for, not reported at once. Without it the card is neither waited for nor checked.
     private fun prepareStartupStorage(run: StartupStorageRun): CompyCardCheckResult? =
         run.prepare(
             gate = recoveryGate,
@@ -279,7 +278,7 @@ class MainActivity : Activity() {
             },
             awaitMount = { state ->
                 CardMountWait.await(
-                    timeoutMs = startupCardWindowMs { startupWindows.mountWaitMs(KioskConfig.CARD_MOUNT_TIMEOUT_MS) },
+                    timeoutMs = startupWindows.mountWaitMs(KioskConfig.CARD_MOUNT_TIMEOUT_MS),
                     pollMs = KioskConfig.CARD_MOUNT_POLL_MS,
                     state = state,
                     now = SystemClock::elapsedRealtime,
@@ -290,7 +289,7 @@ class MainActivity : Activity() {
             mountState = { runCatching { CompyCardCheck.removableVolume(this)?.state }.getOrNull() },
             retry = { check ->
                 val checked = CardCheckRetry.run(
-                    windowMs = startupCardWindowMs { startupWindows.retryWindowMs(KioskConfig.CARD_CHECK_RETRY_WINDOW_MS) },
+                    windowMs = startupWindows.retryWindowMs(KioskConfig.CARD_CHECK_RETRY_WINDOW_MS),
                     intervalMs = KioskConfig.CARD_CHECK_RETRY_INTERVAL_MS,
                     check = check,
                     now = SystemClock::elapsedRealtime,
@@ -334,11 +333,8 @@ class MainActivity : Activity() {
                     recoverPendingProjectRestores(BackupSourceKind.CARD) { CompyStorage.removableStorage(this) }
                 }
             },
+            waitForCard = KioskConfig.STARTUP_CARD_WAIT_ENABLED,
         )
-
-    // Leaves the once-per-process window unstarted while the wait is off.
-    private inline fun startupCardWindowMs(window: () -> Long): Long =
-        if (KioskConfig.STARTUP_CARD_WAIT_ENABLED) window() else 0L
 
     // Returns false to be asked again later.
     private fun onCardStepTimeout(generation: Int, step: String): Boolean {

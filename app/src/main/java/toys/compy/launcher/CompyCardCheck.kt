@@ -71,7 +71,8 @@ object CompyCardCheck {
     /**
      * The result when no removable volume is identified as the card slot; none of them is used.
      * Removable storage that is present but not mounted may be a card that is still mounting or
-     * cannot be mounted, so it reads as unreadable and is checked again. Otherwise there is no card.
+     * cannot be mounted, so it reads as unreadable, and the startup retries, when switched on, check
+     * it again. Otherwise there is no card.
      */
     internal fun withoutIdentifiedCard(unidentified: List<RemovableVolumeSnapshot>): CompyCardCheckResult {
         fun describe(volumes: List<RemovableVolumeSnapshot>) =

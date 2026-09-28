@@ -44,16 +44,6 @@ class CardCheckRetryTest {
     }
 
     @Test
-    fun emptyWindowChecksOnceAndReportsAnAccessFailure() {
-        var checks = 0
-        val outcome = CardCheckRetry.run(0, 3000,
-            check = { checks++; result(CompyCardCondition.UNWRITABLE) }, now = { 0L },
-            pause = { throw AssertionError("empty window checked again") }, isCurrent = { true })
-        assertEquals(CompyCardCondition.UNWRITABLE, outcome?.condition)
-        assertEquals(1, checks)
-    }
-
-    @Test
     fun otherResultsAreReportedAtOnce() {
         for (condition in listOf(CompyCardCondition.HEALTHY, CompyCardCondition.MISSING,
                 CompyCardCondition.UNINITIALIZED, CompyCardCondition.IDENTITY_INVALID)) {
