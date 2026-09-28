@@ -28,8 +28,10 @@ object KioskConfig {
     // startup and on returns to Launcher. The boot-time denial, whose cause is unknown, was met while
     // startup looked at the card, so all of it stays off until it passes repeated cold boots on the
     // cards known to meet that denial (compy-launcher-startup-card-check-restored). Off, startup still
-    // finishes interrupted restores, built-in storage first, then the card without waiting for or
-    // checking it, as v0.4.2 did.
+    // finishes interrupted restores, built-in storage first, then the card, which, as in v0.4.2, it
+    // neither waits for nor checks. Outside the gate: a card initialization a person started in
+    // Maintenance is verified in Maintenance after its restart, and the screen for a long restore
+    // recovery names the card in its advice.
     const val STARTUP_CARD_CHECK_ENABLED = false
     const val CARD_MOUNT_TIMEOUT_MS = 30000L
     const val CARD_MOUNT_POLL_MS = 250L
