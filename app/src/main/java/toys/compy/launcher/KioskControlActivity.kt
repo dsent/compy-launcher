@@ -322,6 +322,12 @@ class KioskControlActivity : Activity() {
                     ),
                 ),
             )
+        if (RootedSystemBars.isAvailable()) {
+            groups += MaintenanceGroup(
+                R.string.maintenance_group_notifications,
+                listOf(MaintenanceAction(R.string.btn_open_notifications, ::openNotifications)),
+            )
+        }
         if (LockTaskController.isDeviceOwner(this)) {
             groups +=
                 MaintenanceGroup(
@@ -400,6 +406,26 @@ class KioskControlActivity : Activity() {
         } else {
             exitMaintenance()
         }
+    }
+
+    private fun openNotifications() {
+        showOperation(
+            getString(R.string.maintenance_opening_notifications),
+            getString(R.string.maintenance_notifications_message),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = { RootedSystemBars.openNotifications(this) },
+            onSuccess = {
+                showOperation(
+                    getString(R.string.maintenance_ready_title),
+                    getString(R.string.maintenance_notifications_message),
+                )
+            },
+            onFailure = {
+                showOperationFailure(getString(R.string.maintenance_notifications_failed))
+            },
+        )
     }
 
     private fun openAndroidSettings() {
