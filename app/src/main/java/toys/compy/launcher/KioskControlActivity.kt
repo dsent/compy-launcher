@@ -63,6 +63,7 @@ class KioskControlActivity : Activity() {
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
     private var maintenanceStatusView: TextView? = null
+    private var softwareVersionsView: TextView? = null
     private var operationTitleView: TextView? = null
     private var operationMessageView: TextView? = null
     private var exitingMaintenance = false
@@ -119,6 +120,7 @@ class KioskControlActivity : Activity() {
             exitMaintenance()
             return
         }
+        updateSoftwareVersions()
         scheduleMaintenanceExpiry()
     }
 
@@ -209,6 +211,14 @@ class KioskControlActivity : Activity() {
             },
         )
 
+        softwareVersionsView = TextView(this).apply {
+            textSize = 14f
+            setTextColor("#D0D0D0".toColorInt())
+            setPadding(0, 0, 0, 16)
+        }
+        actionColumn.addView(softwareVersionsView)
+        updateSoftwareVersions()
+
         maintenanceStatusView =
             TextView(this).apply {
                 setTextColor(Color.YELLOW)
@@ -276,6 +286,22 @@ class KioskControlActivity : Activity() {
         setContentView(root)
         configureActionFocus()
         firstButton?.requestFocus()
+    }
+
+    private fun updateSoftwareVersions() {
+        fun installedVersion(packageName: String): String =
+            try {
+                installedPackageInfo(packageName).versionName?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.maintenance_version_unknown)
+            } catch (_: PackageManager.NameNotFoundException) {
+                getString(R.string.maintenance_version_unknown)
+            }
+        softwareVersionsView?.text = getString(
+            R.string.maintenance_software_versions,
+            getString(R.string.compy_release_version),
+            installedVersion(packageName),
+            installedVersion(KioskConfig.TARGET_PACKAGE),
+        )
     }
 
     private fun configureActionFocus() {

@@ -19,6 +19,8 @@
     <string name="restore_wait_message">Compy is getting your projects ready. Please wait, and keep Compy switched on.\n\nIf this message is still here after 10 minutes, switch Compy off, take out the SD card, and switch Compy on again. Compy then starts without the projects on that card. Later, put the card back and switch Compy off and on to use it again. If this message stays for 10 minutes even without the card, Compy itself needs repair.</string>
     <string name="card_warning_restart_failed">Compy IDE could not restart after the storage choice.</string>
 
+    <string name="maintenance_software_versions">Compy release: %1$s\nLauncher: %2$s\nIDE: %3$s</string>
+    <string name="maintenance_version_unknown">Unknown</string>
     <string name="maintenance_title">Maintenance Mode</string>
     <string name="maintenance_active_until">Maintenance active until: %1$s</string>
     <string name="maintenance_expired">Maintenance expired</string>

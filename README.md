@@ -47,6 +47,12 @@ All kiosk behavior is controlled via `KioskConfig.kt`:
 - Android 13 (API 33) is the primary target.
 - `minSdk` 24 (required for `TileService`).
 
+Maintenance shows the Compy release label and the installed launcher and
+IDE version names. It refreshes the app versions when maintenance resumes
+and displays `Unknown` for any unavailable version. Set
+`COMPY_RELEASE_VERSION` at build time to supply the release label; its
+default is `Unreleased`.
+
 ## Building
 
 Release packaging requires the external PKCS#12 keystore
