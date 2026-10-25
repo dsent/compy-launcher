@@ -27,6 +27,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -58,9 +59,16 @@ class KioskControlActivity : Activity() {
         val unavailable: List<String>,
     )
 
-    private val actionButtons = mutableListOf<Button>()
+    private val actionButtons = mutableListOf<View>()
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
+    private var clockView: TextView? = null
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            updateClock()
+            expiryHandler.postDelayed(this, 1000)
+        }
+    }
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
     private var maintenanceStatusView: TextView? = null
     private var softwareVersionsView: TextView? = null
@@ -122,14 +130,18 @@ class KioskControlActivity : Activity() {
         }
         updateSoftwareVersions()
         scheduleMaintenanceExpiry()
+        expiryHandler.removeCallbacks(clockRunnable)
+        clockRunnable.run()
     }
 
     override fun onPause() {
         expiryHandler.removeCallbacks(expiryRunnable)
+        expiryHandler.removeCallbacks(clockRunnable)
         super.onPause()
     }
 
     override fun onDestroy() {
+        expiryHandler.removeCallbacks(clockRunnable)
         maintenanceExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -192,13 +204,13 @@ class KioskControlActivity : Activity() {
         }
 
         val actionScroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.24f)
             isFillViewport = true
             isVerticalScrollBarEnabled = true
         }
         val actionColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 28, 24, 32)
+            setPadding(24, 20, 24, 20)
         }
         actionScroll.addView(actionColumn)
 
@@ -214,7 +226,7 @@ class KioskControlActivity : Activity() {
         softwareVersionsView = TextView(this).apply {
             textSize = 14f
             setTextColor("#D0D0D0".toColorInt())
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, 10)
         }
         actionColumn.addView(softwareVersionsView)
         updateSoftwareVersions()
@@ -223,7 +235,7 @@ class KioskControlActivity : Activity() {
             TextView(this).apply {
                 setTextColor(Color.YELLOW)
                 textSize = 14f
-                setPadding(0, 0, 0, 20)
+                setPadding(0, 0, 0, 10)
             }
         maintenanceStatusView?.let { statusView ->
             updateStatus(statusView)
@@ -232,24 +244,67 @@ class KioskControlActivity : Activity() {
 
         var firstButton: Button? = null
         maintenanceGroups().forEach { group ->
+            if (group.titleRes == R.string.maintenance_group_recovery) {
+                actionColumn.addView(View(this).apply {
+                    setBackgroundColor(Color.GRAY)
+                    layoutParams = LinearLayout.LayoutParams(-1, 1).apply {
+                        setMargins(0, 16, 0, 0)
+                    }
+                })
+            }
             addGroupHeader(actionColumn, group.titleRes)
-            group.actions.forEach { action ->
-                val button = addButton(actionColumn, action.labelRes, action.invoke)
-                if (firstButton == null) {
-                    firstButton = button
+            group.actions.chunked(2).forEach { actions ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                actions.forEachIndexed { index, action ->
+                    val button = addButton(row, action.labelRes, action.invoke).apply {
+                        textSize = 14f
+                        setPadding(12, 8, 12, 8)
+                        layoutParams = LinearLayout.LayoutParams(0, 52, 1f).apply {
+                            setMargins(if (index == 0) 0 else 5, 0, if (index == 0) 5 else 0, 4)
+                        }
+                    }
+                    if (firstButton == null) firstButton = button
                 }
+                if (actions.size == 1) {
+                    row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+                }
+                actionColumn.addView(row)
             }
         }
+
+        val rightColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 20, 24, 20)
+            setBackgroundColor("#171717".toColorInt())
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.76f)
+        }
+        clockView = TextView(this).apply {
+            textSize = 42f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 12)
+        }
+        rightColumn.addView(clockView)
+        updateClock()
+        val shortcuts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 20)
+        }
+        addShortcut(shortcuts, R.string.btn_open_settings, R.drawable.ic_settings, ::openAndroidSettings)
+        addShortcut(shortcuts, R.string.btn_open_files, R.drawable.ic_files, ::openFiles)
+        if (RootedSystemBars.isAvailable()) {
+            addShortcut(shortcuts, R.string.btn_open_notifications, R.drawable.ic_notifications, ::openNotifications)
+        }
+        rightColumn.addView(shortcuts)
 
         val statusScroll = ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = true
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.9f)
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
         }
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(40, 40, 40, 40)
+            setPadding(0, 12, 0, 12)
             setBackgroundColor("#171717".toColorInt())
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -282,7 +337,8 @@ class KioskControlActivity : Activity() {
         statusScroll.addView(statusPanel)
 
         root.addView(actionScroll)
-        root.addView(statusScroll)
+        rightColumn.addView(statusScroll)
+        root.addView(rightColumn)
         setContentView(root)
         configureActionFocus()
         firstButton?.requestFocus()
@@ -307,17 +363,33 @@ class KioskControlActivity : Activity() {
     private fun configureActionFocus() {
         actionButtons.forEach { button ->
             button.id = View.generateViewId()
-            button.isFocusableInTouchMode = true
+            // Touch-mode focus consumes the first pointer press without clicking.
+            button.isFocusableInTouchMode = false
         }
         actionButtons.forEachIndexed { index, button ->
-            val previous = actionButtons.getOrNull(index - 1)
-            val next = actionButtons.getOrNull(index + 1)
-            previous?.let { button.nextFocusUpId = it.id }
-            next?.let {
-                button.nextFocusDownId = it.id
-                button.nextFocusForwardId = it.id
-            }
+            actionButtons.getOrNull(index + 1)?.let { button.nextFocusForwardId = it.id }
         }
+        // Directional focus follows the actual two-column geometry.
+    }
+
+    private fun addShortcut(parent: LinearLayout, labelRes: Int, iconRes: Int, invoke: () -> Unit) {
+        val label = getString(labelRes)
+        val button = ImageButton(this).apply {
+            setImageResource(iconRes)
+            setBackgroundResource(R.drawable.maintenance_shortcut_background)
+            contentDescription = label
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) tooltipText = label
+            setPadding(14, 14, 14, 14)
+            setOnClickListener { invoke() }
+            layoutParams = LinearLayout.LayoutParams(56, 56).apply { setMargins(0, 0, 12, 0) }
+        }
+        actionButtons += button
+        parent.addView(button)
+    }
+
+    private fun updateClock() {
+        // This presentation tick never counts as a maintenance interaction.
+        clockView?.text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
     }
 
     private fun maintenanceGroups(): List<MaintenanceGroup> {
@@ -340,20 +412,7 @@ class KioskControlActivity : Activity() {
                         MaintenanceAction(R.string.btn_restore_backup, ::chooseBackupToRestore),
                     ),
                 ),
-                MaintenanceGroup(
-                    R.string.maintenance_group_device,
-                    listOf(
-                        MaintenanceAction(R.string.btn_open_settings, ::openAndroidSettings),
-                        MaintenanceAction(R.string.btn_open_files, ::openFiles),
-                    ),
-                ),
             )
-        if (RootedSystemBars.isAvailable()) {
-            groups += MaintenanceGroup(
-                R.string.maintenance_group_notifications,
-                listOf(MaintenanceAction(R.string.btn_open_notifications, ::openNotifications)),
-            )
-        }
         if (LockTaskController.isDeviceOwner(this)) {
             groups +=
                 MaintenanceGroup(

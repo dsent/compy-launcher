@@ -16,9 +16,9 @@ It ensures Compy IDE remains in the foreground with a hidden maintenance mode fo
     - **Quick Settings Tile**: A "Maintenance" tile to toggle maintenance mode from the notification shade.
 - **Maintenance Control**: A hidden screen to launch other apps, access Android settings, manage files, or resume kiosk mode manually.
 - **Notifications on rooted images**: Maintenance offers an Open notifications
-  button when the image supplies the system-bar marker. It opens the panel
+  shortcut when the image supplies the system-bar marker. It opens the panel
   while the status strip stays hidden. LockTask restores its notification
-  restrictions on return to kiosk. The button uses Android's notification
+  restrictions on return to kiosk. The shortcut uses Android's notification
   expansion permission.
 
 - **Startup storage**: Each time Launcher starts, before it first starts Compy IDE, it finishes project restores that a power cut or crash interrupted, first on built-in storage, then on the SD card. With `STARTUP_CARD_CHECK_ENABLED` off, the default, Launcher neither waits for the card nor checks it: it recovers the card's restores at once, which fails without harm when Android has not mounted the card yet, and those restores then wait for a Maintenance restore or a later start of Launcher that finds the card mounted. With it on, Launcher waits up to 30 seconds for Android to mount the card, then checks it, and while the card cannot be read or written yet, checks it again every 3 seconds for up to 30 seconds; it recovers the card's restores after the check. Each of these two waits runs once: a return to Launcher during them, such as a Home press, continues them instead of starting over. When Launcher has waited for the card or a recovery for more than 3 seconds, the screen says Compy is getting projects ready. Compy IDE does not start while a recovery runs. Every other step that reads or writes the card or asks Android about it, including waiting for an earlier check to finish, gets at most 3 seconds, except while a recovery runs, when it waits for that recovery to end; after that Launcher shows the storage warning when the startup card check is on and starts Compy IDE when it is off. Restores not recovered before Compy IDE first starts wait for the next start of Launcher, normally the next restart of Compy, or a Maintenance restore. Launcher cannot tell whether Compy IDE ran before Launcher itself started: if Android restarts Launcher while Compy IDE is open, Launcher recovers once more, beside Compy IDE in the background, before bringing it back. After Compy IDE has started, returns to Launcher check the card only when `STARTUP_CARD_CHECK_ENABLED` is on, and then wait only for what remains of the two waits started at startup. With it on, a card that remains unavailable shows the storage warning; Maintenance remains accessible. Only a card that Android shows in the built-in slot is the SD card. USB storage, including a card in a USB card reader, is never used as the SD card, and without an identified card Launcher uses built-in storage. Removable storage that is present but not mounted counts as an unreadable card.
@@ -65,3 +65,20 @@ The `Package signed launcher` workflow uses the `android-release` environment.
 Configure `ANDROID_KEYSTORE_ALIAS`, `ANDROID_KEYSTORE_BASE64`,
 `ANDROID_KEYSTORE_KEYPASSWORD`, and `ANDROID_KEYSTORE_STOREPASSWORD` as secrets,
 and `ANDROID_SIGNING_CERT_SHA256` as the expected non-secret certificate digest.
+
+## Maintenance Layout And Setup Startup
+
+Maintenance places grouped actions in two columns on the left, below the
+software versions and expiry information. A large current clock and square
+Settings, Files, and Notifications shortcuts stay at the top of the right
+pane. Shortcut hover tooltips and accessible names identify each icon.
+Operation status scrolls below them. Pointer presses activate actions on
+the first click, and keyboard focus follows the layout. Clock refreshes do
+not extend the maintenance timeout.
+
+On an image with the native setup carrier, Launcher holds automatic IDE
+startup while the carrier prepares or completes its dedicated setup job.
+It reads the published intent and control state; it does not inspect
+installed versions or reapply settings. A failed state keeps the startup
+screen visible with the five-Home-press maintenance escape. Images without
+the carrier retain ordinary startup. This carrier targets Android 13.
