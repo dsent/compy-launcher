@@ -287,7 +287,7 @@ class KioskControlActivity : Activity() {
         updateClock()
         val shortcuts = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, 20)
+            setPadding(0, 0, 0, 12)
         }
         addShortcut(shortcuts, R.string.btn_open_settings, R.drawable.ic_settings, ::openAndroidSettings)
         addShortcut(shortcuts, R.string.btn_open_files, R.drawable.ic_files, ::openFiles)
@@ -303,8 +303,8 @@ class KioskControlActivity : Activity() {
         }
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 12, 0, 12)
+            gravity = Gravity.TOP
+            setPadding(0, 0, 0, 12)
             setBackgroundColor("#171717".toColorInt())
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
