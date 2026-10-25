@@ -82,3 +82,14 @@ It reads the published intent and control state; it does not inspect
 installed versions or reapply settings. A failed state keeps the startup
 screen visible with the five-Home-press maintenance escape. Images without
 the carrier retain ordinary startup. This carrier targets Android 13.
+
+The maintenance bell shows a dot while Android has active notifications,
+including ongoing notifications. Its accessible name and tooltip reflect
+the indicator state. Opening the panel leaves the dot visible while those
+notifications remain active. With listener state unavailable, the dot is
+hidden and the tooltip says the indicator is unavailable.
+
+The notification listener initializes from Android's active set and updates
+a presence flag on posting and removal. Maintenance refreshes the dot with
+its existing clock tick. The rooted provisioning image enables listener
+access for Launcher; an installed-only update needs that grant on the device.

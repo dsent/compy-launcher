@@ -14,6 +14,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -28,6 +29,7 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -63,6 +65,8 @@ class KioskControlActivity : Activity() {
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
     private var clockView: TextView? = null
+    private var notificationButton: ImageButton? = null
+    private var notificationDot: View? = null
     private val clockRunnable = object : Runnable {
         override fun run() {
             updateClock()
@@ -196,6 +200,8 @@ class KioskControlActivity : Activity() {
 
     private fun buildControls() {
         actionButtons.clear()
+        notificationButton = null
+        notificationDot = null
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -292,7 +298,7 @@ class KioskControlActivity : Activity() {
         addShortcut(shortcuts, R.string.btn_open_settings, R.drawable.ic_settings, ::openAndroidSettings)
         addShortcut(shortcuts, R.string.btn_open_files, R.drawable.ic_files, ::openFiles)
         if (RootedSystemBars.isAvailable()) {
-            addShortcut(shortcuts, R.string.btn_open_notifications, R.drawable.ic_notifications, ::openNotifications)
+            addShortcut(shortcuts, R.string.btn_open_notifications, R.drawable.ic_notifications, ::openNotifications, indicator = true)
         }
         rightColumn.addView(shortcuts)
 
@@ -372,7 +378,10 @@ class KioskControlActivity : Activity() {
         // Directional focus follows the actual two-column geometry.
     }
 
-    private fun addShortcut(parent: LinearLayout, labelRes: Int, iconRes: Int, invoke: () -> Unit) {
+    private fun addShortcut(
+        parent: LinearLayout, labelRes: Int, iconRes: Int, invoke: () -> Unit,
+        indicator: Boolean = false,
+    ) {
         val label = getString(labelRes)
         val button = ImageButton(this).apply {
             setImageResource(iconRes)
@@ -384,12 +393,49 @@ class KioskControlActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(56, 56).apply { setMargins(0, 0, 12, 0) }
         }
         actionButtons += button
-        parent.addView(button)
+        if (indicator) {
+            val frame = FrameLayout(this).apply { layoutParams = button.layoutParams }
+            button.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            frame.addView(button)
+            notificationButton = button
+            val dot = View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor("#FFE066".toColorInt())
+                }
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                visibility = View.GONE
+                layoutParams = FrameLayout.LayoutParams(8, 8, Gravity.TOP or Gravity.END).apply {
+                    setMargins(0, 7, 7, 0)
+                }
+            }
+            notificationDot = dot
+            frame.addView(dot)
+            parent.addView(frame)
+            updateNotificationIndicator()
+        } else parent.addView(button)
+    }
+
+    private fun updateNotificationIndicator() {
+        val present = MaintenanceNotificationListener.hasActiveNotifications
+        notificationDot?.visibility = if (present == true) View.VISIBLE else View.GONE
+        val label = getString(when (present) {
+            true -> R.string.maintenance_notifications_present
+            false -> R.string.btn_open_notifications
+            null -> R.string.maintenance_notifications_unknown
+        })
+        notificationButton?.let { button ->
+            if (button.contentDescription != label) {
+                button.contentDescription = label
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) button.tooltipText = label
+            }
+        }
     }
 
     private fun updateClock() {
         // This presentation tick never counts as a maintenance interaction.
         clockView?.text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        updateNotificationIndicator()
     }
 
     private fun maintenanceGroups(): List<MaintenanceGroup> {

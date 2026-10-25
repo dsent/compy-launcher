@@ -140,4 +140,6 @@
     <string name="maintenance_notifications_failed">Compy could not open notifications. You can continue using the other maintenance controls.</string>
     <string name="setup_startup_wait">Setting up Compy. Keep the power connected.</string>
     <string name="setup_startup_failed">Setup could not start. Press Home five times to open maintenance.</string>
+    <string name="maintenance_notifications_present">Open notifications (notifications present)</string>
+    <string name="maintenance_notifications_unknown">Open notifications (indicator unavailable)</string>
 </resources>
