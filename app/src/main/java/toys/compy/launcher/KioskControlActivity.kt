@@ -8,13 +8,17 @@ package toys.compy.launcher
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -34,6 +38,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.toColorInt
 import java.io.File
 import java.io.IOException
@@ -65,6 +70,13 @@ class KioskControlActivity : Activity() {
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
     private var clockView: TextView? = null
+    private var batteryView: TextView? = null
+    private var batteryReceiverRegistered = false
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_BATTERY_CHANGED) updateBattery(intent)
+        }
+    }
     private var notificationButton: ImageButton? = null
     private var notificationDot: View? = null
     private val clockRunnable = object : Runnable {
@@ -133,12 +145,17 @@ class KioskControlActivity : Activity() {
             return
         }
         updateSoftwareVersions()
+        startBatteryUpdates()
         scheduleMaintenanceExpiry()
         expiryHandler.removeCallbacks(clockRunnable)
         clockRunnable.run()
     }
 
     override fun onPause() {
+        if (batteryReceiverRegistered) {
+            unregisterReceiver(batteryReceiver)
+            batteryReceiverRegistered = false
+        }
         expiryHandler.removeCallbacks(expiryRunnable)
         expiryHandler.removeCallbacks(clockRunnable)
         super.onPause()
@@ -287,10 +304,17 @@ class KioskControlActivity : Activity() {
         clockView = TextView(this).apply {
             textSize = 42f
             setTextColor(Color.WHITE)
-            setPadding(0, 0, 0, 12)
+            setPadding(0, 0, 0, 4)
         }
         rightColumn.addView(clockView)
         updateClock()
+        batteryView = TextView(this).apply {
+            text = getString(R.string.maintenance_battery_unavailable)
+            textSize = 16f
+            setTextColor("#D0D0D0".toColorInt())
+            setPadding(0, 0, 0, 12)
+        }
+        rightColumn.addView(batteryView)
         val shortcuts = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 12)
@@ -436,6 +460,43 @@ class KioskControlActivity : Activity() {
         // This presentation tick never counts as a maintenance interaction.
         clockView?.text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         updateNotificationIndicator()
+    }
+
+    private fun startBatteryUpdates() {
+        if (batteryReceiverRegistered) return
+        // The sticky broadcast gives an immediate value on every return to Maintenance.
+        val current = ContextCompat.registerReceiver(
+            this,
+            batteryReceiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        batteryReceiverRegistered = true
+        updateBattery(current)
+    }
+
+    private fun updateBattery(intent: Intent?) {
+        if (intent == null || !intent.getBooleanExtra(BatteryManager.EXTRA_PRESENT, true)) {
+            batteryView?.text = getString(R.string.maintenance_battery_unavailable)
+            return
+        }
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        val percentage = if (scale > 0 && level in 0..scale) {
+            getString(R.string.maintenance_battery_percentage, level.toLong() * 100 / scale)
+        } else getString(R.string.maintenance_version_unknown)
+        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
+        val state = when {
+            // Unplugging takes precedence over a retained charging/full status.
+            plugged == 0 -> R.string.maintenance_battery_discharging
+            status == BatteryManager.BATTERY_STATUS_CHARGING -> R.string.maintenance_battery_charging
+            status == BatteryManager.BATTERY_STATUS_FULL -> R.string.maintenance_battery_full
+            status == BatteryManager.BATTERY_STATUS_DISCHARGING -> R.string.maintenance_battery_discharging
+            status == BatteryManager.BATTERY_STATUS_NOT_CHARGING -> R.string.maintenance_battery_not_charging
+            else -> R.string.maintenance_battery_state_unknown
+        }
+        batteryView?.text = getString(R.string.maintenance_battery_state, percentage, getString(state))
     }
 
     private fun maintenanceGroups(): List<MaintenanceGroup> {

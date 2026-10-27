@@ -21,6 +21,14 @@
 
     <string name="maintenance_software_versions">Compy release: %1$s\nLauncher: %2$s\nIDE: %3$s</string>
     <string name="maintenance_version_unknown">Unknown</string>
+    <string name="maintenance_battery_state">Battery: %1$s · %2$s</string>
+    <string name="maintenance_battery_percentage">%1$d%%</string>
+    <string name="maintenance_battery_charging">Charging</string>
+    <string name="maintenance_battery_full">Full</string>
+    <string name="maintenance_battery_discharging">Discharging</string>
+    <string name="maintenance_battery_not_charging">Not charging</string>
+    <string name="maintenance_battery_state_unknown">State unknown</string>
+    <string name="maintenance_battery_unavailable">Battery unavailable</string>
     <string name="maintenance_title">Maintenance Mode</string>
     <string name="maintenance_active_until">Maintenance active until: %1$s</string>
     <string name="maintenance_expired">Maintenance expired</string>

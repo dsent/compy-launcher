@@ -76,6 +76,12 @@ Operation status scrolls below them. Pointer presses activate actions on
 the first click, and keyboard focus follows the layout. Clock refreshes do
 not extend the maintenance timeout.
 
+Below the clock, Maintenance shows the current battery percentage and
+Android's charging state. It reads the latest battery report when the screen
+resumes and receives updates while it is open. Unavailable readings are
+labeled. A Charging state reports Android's status; check percentage over
+time to confirm the battery is gaining charge.
+
 On an image with the native setup carrier, Launcher holds automatic IDE
 startup while the carrier prepares or completes its dedicated setup job.
 It reads the published intent and control state; it does not inspect
