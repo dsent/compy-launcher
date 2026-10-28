@@ -8,12 +8,17 @@ package toys.compy.launcher
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -27,10 +32,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageButton
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.toColorInt
 import java.io.File
 import java.io.IOException
@@ -58,11 +66,28 @@ class KioskControlActivity : Activity() {
         val unavailable: List<String>,
     )
 
-    private val actionButtons = mutableListOf<Button>()
+    private val actionButtons = mutableListOf<View>()
     private val expiryHandler = Handler(Looper.getMainLooper())
     private val expiryRunnable = Runnable { handleMaintenanceExpiry() }
+    private var clockView: TextView? = null
+    private var batteryView: TextView? = null
+    private var batteryReceiverRegistered = false
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_BATTERY_CHANGED) updateBattery(intent)
+        }
+    }
+    private var notificationButton: ImageButton? = null
+    private var notificationDot: View? = null
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            updateClock()
+            expiryHandler.postDelayed(this, 1000)
+        }
+    }
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
     private var maintenanceStatusView: TextView? = null
+    private var softwareVersionsView: TextView? = null
     private var operationTitleView: TextView? = null
     private var operationMessageView: TextView? = null
     private var exitingMaintenance = false
@@ -119,15 +144,25 @@ class KioskControlActivity : Activity() {
             exitMaintenance()
             return
         }
+        updateSoftwareVersions()
+        startBatteryUpdates()
         scheduleMaintenanceExpiry()
+        expiryHandler.removeCallbacks(clockRunnable)
+        clockRunnable.run()
     }
 
     override fun onPause() {
+        if (batteryReceiverRegistered) {
+            unregisterReceiver(batteryReceiver)
+            batteryReceiverRegistered = false
+        }
         expiryHandler.removeCallbacks(expiryRunnable)
+        expiryHandler.removeCallbacks(clockRunnable)
         super.onPause()
     }
 
     override fun onDestroy() {
+        expiryHandler.removeCallbacks(clockRunnable)
         maintenanceExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -182,6 +217,8 @@ class KioskControlActivity : Activity() {
 
     private fun buildControls() {
         actionButtons.clear()
+        notificationButton = null
+        notificationDot = null
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -190,13 +227,13 @@ class KioskControlActivity : Activity() {
         }
 
         val actionScroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.24f)
             isFillViewport = true
             isVerticalScrollBarEnabled = true
         }
         val actionColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 28, 24, 32)
+            setPadding(24, 20, 24, 20)
         }
         actionScroll.addView(actionColumn)
 
@@ -209,11 +246,19 @@ class KioskControlActivity : Activity() {
             },
         )
 
+        softwareVersionsView = TextView(this).apply {
+            textSize = 14f
+            setTextColor("#D0D0D0".toColorInt())
+            setPadding(0, 0, 0, 10)
+        }
+        actionColumn.addView(softwareVersionsView)
+        updateSoftwareVersions()
+
         maintenanceStatusView =
             TextView(this).apply {
                 setTextColor(Color.YELLOW)
                 textSize = 14f
-                setPadding(0, 0, 0, 20)
+                setPadding(0, 0, 0, 10)
             }
         maintenanceStatusView?.let { statusView ->
             updateStatus(statusView)
@@ -222,24 +267,74 @@ class KioskControlActivity : Activity() {
 
         var firstButton: Button? = null
         maintenanceGroups().forEach { group ->
+            if (group.titleRes == R.string.maintenance_group_recovery) {
+                actionColumn.addView(View(this).apply {
+                    setBackgroundColor(Color.GRAY)
+                    layoutParams = LinearLayout.LayoutParams(-1, 1).apply {
+                        setMargins(0, 16, 0, 0)
+                    }
+                })
+            }
             addGroupHeader(actionColumn, group.titleRes)
-            group.actions.forEach { action ->
-                val button = addButton(actionColumn, action.labelRes, action.invoke)
-                if (firstButton == null) {
-                    firstButton = button
+            group.actions.chunked(2).forEach { actions ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                actions.forEachIndexed { index, action ->
+                    val button = addButton(row, action.labelRes, action.invoke).apply {
+                        textSize = 14f
+                        setPadding(12, 8, 12, 8)
+                        layoutParams = LinearLayout.LayoutParams(0, 52, 1f).apply {
+                            setMargins(if (index == 0) 0 else 5, 0, if (index == 0) 5 else 0, 4)
+                        }
+                    }
+                    if (firstButton == null) firstButton = button
                 }
+                if (actions.size == 1) {
+                    row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+                }
+                actionColumn.addView(row)
             }
         }
+
+        val rightColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 20, 24, 20)
+            setBackgroundColor("#171717".toColorInt())
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.76f)
+        }
+        clockView = TextView(this).apply {
+            textSize = 42f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 4)
+        }
+        rightColumn.addView(clockView)
+        updateClock()
+        batteryView = TextView(this).apply {
+            text = getString(R.string.maintenance_battery_unavailable)
+            textSize = 16f
+            setTextColor("#D0D0D0".toColorInt())
+            setPadding(0, 0, 0, 12)
+        }
+        rightColumn.addView(batteryView)
+        val shortcuts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 12)
+        }
+        addShortcut(shortcuts, R.string.btn_open_settings, R.drawable.ic_settings, ::openAndroidSettings)
+        addShortcut(shortcuts, R.string.btn_open_files, R.drawable.ic_files, ::openFiles)
+        if (RootedSystemBars.isAvailable()) {
+            addShortcut(shortcuts, R.string.btn_open_notifications, R.drawable.ic_notifications, ::openNotifications, indicator = true)
+        }
+        rightColumn.addView(shortcuts)
 
         val statusScroll = ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = true
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.9f)
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
         }
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(40, 40, 40, 40)
+            gravity = Gravity.TOP
+            setPadding(0, 0, 0, 12)
             setBackgroundColor("#171717".toColorInt())
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -272,26 +367,136 @@ class KioskControlActivity : Activity() {
         statusScroll.addView(statusPanel)
 
         root.addView(actionScroll)
-        root.addView(statusScroll)
+        rightColumn.addView(statusScroll)
+        root.addView(rightColumn)
         setContentView(root)
         configureActionFocus()
         firstButton?.requestFocus()
     }
 
+    private fun updateSoftwareVersions() {
+        fun installedVersion(packageName: String): String =
+            try {
+                installedPackageInfo(packageName).versionName?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.maintenance_version_unknown)
+            } catch (_: PackageManager.NameNotFoundException) {
+                getString(R.string.maintenance_version_unknown)
+            }
+        softwareVersionsView?.text = getString(
+            R.string.maintenance_software_versions,
+            getString(R.string.compy_release_version),
+            installedVersion(packageName),
+            installedVersion(KioskConfig.TARGET_PACKAGE),
+        )
+    }
+
     private fun configureActionFocus() {
         actionButtons.forEach { button ->
             button.id = View.generateViewId()
-            button.isFocusableInTouchMode = true
+            // Touch-mode focus consumes the first pointer press without clicking.
+            button.isFocusableInTouchMode = false
         }
         actionButtons.forEachIndexed { index, button ->
-            val previous = actionButtons.getOrNull(index - 1)
-            val next = actionButtons.getOrNull(index + 1)
-            previous?.let { button.nextFocusUpId = it.id }
-            next?.let {
-                button.nextFocusDownId = it.id
-                button.nextFocusForwardId = it.id
+            actionButtons.getOrNull(index + 1)?.let { button.nextFocusForwardId = it.id }
+        }
+        // Directional focus follows the actual two-column geometry.
+    }
+
+    private fun addShortcut(
+        parent: LinearLayout, labelRes: Int, iconRes: Int, invoke: () -> Unit,
+        indicator: Boolean = false,
+    ) {
+        val label = getString(labelRes)
+        val button = ImageButton(this).apply {
+            setImageResource(iconRes)
+            setBackgroundResource(R.drawable.maintenance_shortcut_background)
+            contentDescription = label
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) tooltipText = label
+            setPadding(14, 14, 14, 14)
+            setOnClickListener { invoke() }
+            layoutParams = LinearLayout.LayoutParams(56, 56).apply { setMargins(0, 0, 12, 0) }
+        }
+        actionButtons += button
+        if (indicator) {
+            val frame = FrameLayout(this).apply { layoutParams = button.layoutParams }
+            button.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            frame.addView(button)
+            notificationButton = button
+            val dot = View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor("#FFE066".toColorInt())
+                }
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                visibility = View.GONE
+                layoutParams = FrameLayout.LayoutParams(8, 8, Gravity.TOP or Gravity.END).apply {
+                    setMargins(0, 7, 7, 0)
+                }
+            }
+            notificationDot = dot
+            frame.addView(dot)
+            parent.addView(frame)
+            updateNotificationIndicator()
+        } else parent.addView(button)
+    }
+
+    private fun updateNotificationIndicator() {
+        val present = MaintenanceNotificationListener.hasActiveNotifications
+        notificationDot?.visibility = if (present == true) View.VISIBLE else View.GONE
+        val label = getString(when (present) {
+            true -> R.string.maintenance_notifications_present
+            false -> R.string.btn_open_notifications
+            null -> R.string.maintenance_notifications_unknown
+        })
+        notificationButton?.let { button ->
+            if (button.contentDescription != label) {
+                button.contentDescription = label
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) button.tooltipText = label
             }
         }
+    }
+
+    private fun updateClock() {
+        // This presentation tick never counts as a maintenance interaction.
+        clockView?.text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        updateNotificationIndicator()
+    }
+
+    private fun startBatteryUpdates() {
+        if (batteryReceiverRegistered) return
+        // The sticky broadcast gives an immediate value on every return to Maintenance.
+        val current = ContextCompat.registerReceiver(
+            this,
+            batteryReceiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        batteryReceiverRegistered = true
+        updateBattery(current)
+    }
+
+    private fun updateBattery(intent: Intent?) {
+        if (intent == null || !intent.getBooleanExtra(BatteryManager.EXTRA_PRESENT, true)) {
+            batteryView?.text = getString(R.string.maintenance_battery_unavailable)
+            return
+        }
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        val percentage = if (scale > 0 && level in 0..scale) {
+            getString(R.string.maintenance_battery_percentage, level.toLong() * 100 / scale)
+        } else getString(R.string.maintenance_version_unknown)
+        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
+        val state = when {
+            // Unplugging takes precedence over a retained charging/full status.
+            plugged == 0 -> R.string.maintenance_battery_discharging
+            status == BatteryManager.BATTERY_STATUS_CHARGING -> R.string.maintenance_battery_charging
+            status == BatteryManager.BATTERY_STATUS_FULL -> R.string.maintenance_battery_full
+            status == BatteryManager.BATTERY_STATUS_DISCHARGING -> R.string.maintenance_battery_discharging
+            status == BatteryManager.BATTERY_STATUS_NOT_CHARGING -> R.string.maintenance_battery_not_charging
+            else -> R.string.maintenance_battery_state_unknown
+        }
+        batteryView?.text = getString(R.string.maintenance_battery_state, percentage, getString(state))
     }
 
     private fun maintenanceGroups(): List<MaintenanceGroup> {
@@ -312,13 +517,6 @@ class KioskControlActivity : Activity() {
                         MaintenanceAction(R.string.btn_restore_stock, ::chooseStockRestoreRoot),
                         MaintenanceAction(R.string.btn_create_backup, ::confirmCreateBackup),
                         MaintenanceAction(R.string.btn_restore_backup, ::chooseBackupToRestore),
-                    ),
-                ),
-                MaintenanceGroup(
-                    R.string.maintenance_group_device,
-                    listOf(
-                        MaintenanceAction(R.string.btn_open_settings, ::openAndroidSettings),
-                        MaintenanceAction(R.string.btn_open_files, ::openFiles),
                     ),
                 ),
             )
@@ -400,6 +598,26 @@ class KioskControlActivity : Activity() {
         } else {
             exitMaintenance()
         }
+    }
+
+    private fun openNotifications() {
+        showOperation(
+            getString(R.string.maintenance_opening_notifications),
+            getString(R.string.maintenance_notifications_message),
+            busy = true,
+        )
+        runMaintenanceOperation(
+            operation = { RootedSystemBars.openNotifications(this) },
+            onSuccess = {
+                showOperation(
+                    getString(R.string.maintenance_ready_title),
+                    getString(R.string.maintenance_notifications_message),
+                )
+            },
+            onFailure = {
+                showOperationFailure(getString(R.string.maintenance_notifications_failed))
+            },
+        )
     }
 
     private fun openAndroidSettings() {

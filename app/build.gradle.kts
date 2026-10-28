@@ -11,6 +11,15 @@ val buildVersionName: String =
         ?.takeIf { it.isNotBlank() }
         ?: "0.0.0"
 
+// A display label supplied by the image/release build; it claims no version.
+val compyReleaseVersion: String =
+    providers.environmentVariable("COMPY_RELEASE_VERSION").orNull
+        ?.takeIf { it.isNotBlank() }
+        ?: "Unreleased"
+require(Regex("[A-Za-z0-9][A-Za-z0-9 ._+()/:-]{0,119}").matches(compyReleaseVersion)) {
+    "COMPY_RELEASE_VERSION must be a short printable version label"
+}
+
 val buildVersionCode: Int =
     providers.environmentVariable("VERSION_CODE").orNull
         ?.takeIf { it.isNotBlank() }
@@ -46,6 +55,7 @@ val stableSigningConfigured = configuredSigningValues == signingEnvironment.size
 android {
     namespace = "toys.compy.launcher"
     compileSdk = 37
+    buildFeatures { resValues = true }
 
     defaultConfig {
         applicationId = "toys.compy.launcher"
@@ -53,6 +63,7 @@ android {
         targetSdk = 33
         versionCode = buildVersionCode
         versionName = buildVersionName
+        resValue("string", "compy_release_version", compyReleaseVersion)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private var maintenanceOpening = false
     private val homeEntryGate = HomeEntryGate()
     private val cardCheckExecutor = Executors.newSingleThreadExecutor()
+    private val setupExecutor = Executors.newSingleThreadExecutor()
     private lateinit var root: FrameLayout
     @Volatile private var cardCheckGeneration = 0
     // When the launcher started waiting for a result; a new run while the wait goes on keeps it.
@@ -42,6 +43,9 @@ class MainActivity : Activity() {
     private var activeCardWarning: CompyCardCheckResult? = null
     private var cardWarningVisible = false
     private var restoreWaitView: TextView? = null
+    private var setupWaitView: TextView? = null
+    private var setupGeneration = 0
+    private val setupRetry = Runnable { awaitSetupBeforeLaunch() }
 
     private val launchRunnable = Runnable {
         performLaunch()
@@ -61,6 +65,9 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         cardCheckGeneration++
+        setupGeneration++
+        handler.removeCallbacks(setupRetry)
+        setupExecutor.shutdownNow()
         cardCheckExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -110,6 +117,8 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         launcherResumed = false
+        setupGeneration++
+        handler.removeCallbacks(setupRetry)
         cardCheckGeneration++
         homeEntryGate.onPause()
         super.onPause()
@@ -158,8 +167,38 @@ class MainActivity : Activity() {
             openMaintenanceMode()
         } else {
             maintenanceOpening = false
-            beginCardCheck()
-            scheduleLaunch()
+            awaitSetupBeforeLaunch()
+        }
+    }
+
+    private fun awaitSetupBeforeLaunch() {
+        val generation = ++setupGeneration
+        handler.removeCallbacks(setupRetry)
+        handler.removeCallbacks(launchRunnable)
+        // A stalled card read must not block this setup decision.
+        setupExecutor.execute {
+            val setup = RootedSetup.read()
+            handler.post {
+                if (generation != setupGeneration || !launcherResumed || isFinishing || isDestroyed) return@post
+                if (setup == RootedSetup.State.READY) {
+                    setupWaitView?.let { root.removeView(it) }
+                    setupWaitView = null
+                    root.setBackgroundColor(Color.BLACK)
+                    beginCardCheck()
+                    scheduleLaunch()
+                } else {
+                    val view = setupWaitView ?: TextView(this).apply {
+                        gravity = Gravity.CENTER
+                        textSize = 24f
+                        setTextColor(Color.rgb(23, 77, 97))
+                        root.addView(this, FrameLayout.LayoutParams(-1, -1))
+                        setupWaitView = this
+                    }
+                    root.setBackgroundColor(Color.rgb(191, 191, 191))
+                    view.setText(if (setup == RootedSetup.State.WAITING) R.string.setup_startup_wait else R.string.setup_startup_failed)
+                    handler.postDelayed(setupRetry, 1000)
+                }
+            }
         }
     }
 
@@ -168,6 +207,8 @@ class MainActivity : Activity() {
             return
         }
         maintenanceOpening = true
+        setupGeneration++
+        handler.removeCallbacks(setupRetry)
         if (cardInitializationRequested) {
             KioskState.requestCardInitialization(this)
         }
